@@ -1,0 +1,15 @@
+# Python 缓存与构建产物
+__pycache__/
+
+# 编辑器与操作系统文件
+.vscode/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.swp
+
+# 数据集及生成结果
+/data/
+/outputs/
+/models/
