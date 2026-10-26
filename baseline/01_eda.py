@@ -47,8 +47,15 @@ cols_test_types = application_test.dtypes
 print(cols_train_types.drop('TARGET').equals(cols_test_types))
 # True
 
-"SK_ID_CURR 需要转换为 str, 其余变量不需要转换"
-application_train['SK_ID_CURR'] = application_train['SK_ID_CURR'].astype(str) 
+'''SK_ID_CURR 转换为 str
+   CNT_FAM_MEMBERS 转换为 int
+   OWN_CAR_AGE 转换为 int
+   其余变量不需要转换'''
+
+application_train['SK_ID_CURR'] = application_train['SK_ID_CURR'].astype(str)
+application_train['CNT_FAM_MEMBERS'] = application_train['CNT_FAM_MEMBERS'].astype('Int64')
+application_train['OWN_CAR_AGE'] = application_train['OWN_CAR_AGE'].astype('Int64')
+
 
 # -- 重复与唯一性 --
 print(application_train.duplicated().any())
@@ -109,7 +116,7 @@ for rate, group in missing_summary.groupby('missing_rate'):
 
 del rate, group, temp_df, temp_list, same_missing_pattern_groups
 
-# -> 相同缺失率的字段缺失模式都相同
+" -> 相同缺失率的字段缺失模式都相同"
 
 missing_summary.groupby('missing_rate').head(1).sort_values(by='missing_rate', ascending=False)
 #                           index  missing_rate
@@ -153,8 +160,8 @@ missing_summary = missing_summary.merge(
 
 missing_summary = missing_summary.drop(columns='index')
 
-# -> 缺失率较高的字段大部分是与房屋相关
-# -> 说明一部分申请人缺少相关房屋信息，而不是数据随机缺失
+''' -> 缺失率较高的字段大部分是与房屋相关
+    -> 说明一部分申请人缺少相关房屋信息，而不是数据随机缺失 '''
 
 # 去除房屋相关字段后，其余高缺失率变量
 missing_summary.loc[
@@ -265,7 +272,7 @@ for rate, group in missing_impact_summary.groupby('missing_rate'):
             print(f"{temp_list}的坏样本率不同")
 
 del temp_list, temp_s, group, rate
-# 坏样本率都相同
+" 坏样本率都相同"
 
 del missing_columns, missing_summary
 
@@ -294,7 +301,6 @@ def run_ztest_row(row):
 
 missing_impact_summary[['z_stat', 'p_value']] = missing_impact_summary.apply(run_ztest_row, axis=1)
 
-# 检验结果除
 # 	missing_cols	missing_rate
 # 7	EXT_SOURCE_2	0.21%
 # 60	DAYS_LAST_PHONE_CHANGE	0.00%
@@ -302,9 +308,13 @@ missing_impact_summary[['z_stat', 'p_value']] = missing_impact_summary.apply(run
 # 5	CNT_FAM_MEMBERS	0.00%
 # 0	AMT_ANNUITY	0.00%
 
-# 以外，差值均非常显著，说明缺失对于违约是一个强信号
+''' 这些变量的缺失率非常小，并且缺失组与正常组的违约率无显著差异，后续用中位数填充
+    其余差异显著，考虑在特征工程阶段添加 _is_missing 列，相同缺失模式的只添加一列 '''
+
+missing_impact_summary['is_significant'] = missing_impact_summary['p_value'] < 0.05
+
+# 除此以外，其余变量两组差值均非常显著，说明缺失对于违约是一个强信号
 # 后续特征工程添加显著列 _miss 特征
-# 非显著列采用中位数填充或者增加missing类
 
 # 对于房屋相关字段，缺失模式相同，考虑后续特征工程只添加一个_miss变量，避免信息重复
 
@@ -313,7 +323,7 @@ missing_impact_summary.to_csv(DATA_PATH / 'interim' / 'missing_impact_summary.cs
 del missing_impact_summary
 
 # -- 异常值分析 --
-# 针对连续性数值变量
+# 针对数值变量
 def get_outlier(s):
     Q_1 = s.quantile(0.25)
     Q_3 = s.quantile(0.75)
@@ -323,13 +333,13 @@ def get_outlier(s):
                 | (s > Q_3 + 1.5 * IQR)]
     return outlier
 
-nm_df = application_train.select_dtypes(include='float')
+nm_df = application_train.select_dtypes(exclude='object')
 outliers_dict = {col: get_outlier(nm_df[col])
                  for col in nm_df.columns}
 
 del nm_df
 
-# 从 outliers_dict 中数量最多的开始分析
+# DAYS_EMPLOYED 存在异常值365243
 
 # %%
 "二、目标变量分析"
@@ -381,6 +391,11 @@ for col in discrete_values_columns:
     discrete_values_frequency[col] = application_train[col].value_counts()
 
 del col
+
+# 新建处理汇总表
+discrete_values_summary = pd.DataFrame({'columns': discrete_values_columns,
+                                        'process': 'keep'})
+
 # DAYS_EMPLOYED 存在异常编码 55374
 
 # 存在取值极度稀有情况
@@ -393,6 +408,11 @@ del col
 # FLAG_DOCUMENT_4	count
 # 0	307486
 # 1	25
+
+# FLAG_MOBIL 删除，几乎0方差
+discrete_values_summary.loc[
+    discrete_values_summary['columns'] == 'FLAG_MOBIL',
+    'process'] = 'delete'
 
 # 重点检查 FLAG_DOCUMENT_ 的取值情况（0/1）
 FLAG_frequency = pd.DataFrame({
@@ -424,9 +444,17 @@ FLAG_frequency = pd.DataFrame({
 # 18	FLAG_DOCUMENT_20	0.0507%
 # 19	FLAG_DOCUMENT_21	0.0335%
 
-# 小于0.1%：FLAG_DOCUMENT_2、4、7、10、12、17、19、20、21
-# 0.1%到2%：FLAG_DOCUMENT_5、9、11、13、14、15、16、18
-# 大于2%：FLAG_DOCUMENT_3、6、8
+# 小于 0.01%：DOCUMENT_2、4、10、12，考虑删除
+# 0.01%–0.1%：DOCUMENT_7、17、19、20、21，考虑删除
+# 0.1%–1%：DOCUMENT_9、11、13、14、15、18，结合违约率进一步判断
+# 1%–10%：DOCUMENT_5、6、8、16，保留
+# 大于 10%：DOCUMENT_3，保留
+
+discrete_values_summary.loc[
+    discrete_values_summary['columns'].isin([
+        f"FLAG_DOCUMENT_{i}"
+        for i in [2, 4, 10, 12, 7, 17, 19, 20, 21]
+    ]), 'process'] = 'delete'
 
 # 对FLAG_DOCUMENT_3、6、8稳定的类别变量进一步分析不同类别违约率大小
 for col in ['FLAG_DOCUMENT_3', 'FLAG_DOCUMENT_6', 'FLAG_DOCUMENT_8']:
@@ -445,9 +473,6 @@ for col in ['FLAG_DOCUMENT_3', 'FLAG_DOCUMENT_6', 'FLAG_DOCUMENT_8']:
 # FLAG_DOCUMENT_8取值为0时，违约率：8.14%
 
 # 存在明显差异，可能提供违约信息，在特征工程重点考虑
-
-# 小于0.1%的，变量不稳定，暂时保留
-# 对于0.1%到2%的，特征工程考虑构建一个组合变量
 
 del FLAG_frequency, col, default_rate_1, default_rate_0
 
@@ -533,29 +558,51 @@ sns.histplot(x=-discrete_values_frequency['DAYS_ID_PUBLISH'].index / 365,
 # 进行分箱判断与 TARGET 的关系
 # 分箱方法有业务含义分箱、等宽分箱、等频分箱
 
+# 一般处理函数
+def bins_stats(bins: list, labels: list, column: str, df: pd.DataFrame) -> pd.DataFrame():
+    if column.startswith('DAYS_'):
+        data = -application_train[column] / 365
+    else:
+        data = application_train[column]
+
+    application_train[f"{column}_bins"] = pd.cut(
+        x=data,
+        bins=bins,
+        labels=labels,
+        right=False
+    )
+    
+    if application_train[f"{column}_bins"].isna().any():
+        application_train[f"{column}_bins"] = \
+            application_train[f"{column}_bins"].cat.add_categories(['特殊编码组']).fillna('特殊编码组')
+    
+    # 统计不同箱子违约率
+    df['default_rate'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins")['TARGET'].mean().map(lambda x: f"{x:.2%}")
+    )
+    # 统计不同箱子样本量
+    df['population'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins").size()
+    )
+    # 统计不同箱子的违约样本量
+    df['pop_default'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins")['TARGET'].sum()
+    )
+    
+    return df
+
 # DAYS_BIRTH 取值范围为20~70，按业务含义分箱，20~29，30~39一个箱子
 bins_birth = [20, 30, 40, 50, 60, np.inf]
 labels_birth = ['20~29岁', '30~39岁', '40~49岁', '50岁~59岁', '60岁以上']
 
-birth_bins = pd.DataFrame({'bins_birth': labels_birth})
-application_train['birth_bins'] = pd.cut(
-    -application_train['DAYS_BIRTH'] / 365,
-    bins=bins_birth,
-    labels=labels_birth,
-    right=False)
+DAYS_BIRTH_summary = pd.DataFrame({'bins': labels_birth})
 
-# 统计每个箱子的违约率
-birth_bins['default_rate'] = birth_bins['bins_birth'].map(
-    application_train.groupby('birth_bins')['TARGET'].mean().map(lambda x: f"{x:.2%}")
-)
-birth_bins['population'] = birth_bins['bins_birth'].map(
-    application_train.groupby('birth_bins').size()
-)
-birth_bins['pop_default'] = birth_bins['bins_birth'].map(
-    application_train.groupby('birth_bins')['TARGET'].sum()
-)
+DAYS_BIRTH_summary = bins_stats(bins=bins_birth,
+                                labels=labels_birth,
+                                column='DAYS_BIRTH',
+                                df=DAYS_BIRTH_summary)
 
-# 	bins_birth	default_rate	population	pop_default
+# 	bins	default_rate	population	pop_default
 # 0	20~29岁	11.46%	45000	5155
 # 1	30~39岁	9.58%	82299	7885
 # 2	40~49岁	7.66%	76543	5860
@@ -564,32 +611,18 @@ birth_bins['pop_default'] = birth_bins['bins_birth'].map(
 
 # 各组的样本量充足，违约率和年龄是单调递减的关系
 
-del bins_birth, labels_birth, birth_bins
+del bins_birth, labels_birth
 
 # DAYS_EMPLOYED 将特殊编码365243单独一个箱子，采用业务含义分箱，
 bins_employed = [0, 1, 3, 5, 10, np.inf]
 labels_employed = ['少于1年', '1~3年', '3~5年', '5~10年', '10年以上']
 
-employed_bins = pd.DataFrame({'employed_bins': labels_employed + ['特殊编码组']})
-application_train['employed_bins'] = pd.cut(
-    (-application_train['DAYS_EMPLOYED'] / 365),
-    bins=bins_employed,
-    labels=labels_employed,
-    right=False)
+DAYS_EMPLOYED_summary = pd.DataFrame({'bins': labels_employed + ['特殊编码组']})
 
-application_train['employed_bins'] = \
-    application_train['employed_bins'].cat.add_categories(['特殊编码组']).fillna('特殊编码组')
-
-# 统计每个分箱的违约率
-employed_bins['default_rate'] = employed_bins['employed_bins'].map(
-    application_train.groupby('employed_bins')['TARGET'].mean().map(lambda x: f"{x:.2%}")
-)
-employed_bins['population'] = employed_bins['employed_bins'].map(
-    application_train.groupby('employed_bins').size()
-)
-employed_bins['pop_default'] = employed_bins['employed_bins'].map(
-    application_train.groupby('employed_bins')['TARGET'].sum()
-)
+DAYS_EMPLOYED_summary = bins_stats(bins_employed,
+                                   labels_employed,
+                                   'DAYS_EMPLOYED',
+                                   DAYS_EMPLOYED_summary)
 
 # 	employed_bins	default_rate	population	pop_default
 # 0	少于1年	10.98%	27904	3065
@@ -601,30 +634,21 @@ employed_bins['pop_default'] = employed_bins['employed_bins'].map(
 
 # 各组的样本量充足，可以看出随着工作年限增长，违约率是下降的，但是不是一个严格的线性关系
 
-del bins_employed, labels_employed, employed_bins
+del bins_employed, labels_employed
 
 # 最后分析 DAYS_ID_PUBLISH
 # 采用业务含义分箱
 bins_publish = [0, 2, 5, 10, 15, np.inf]
 label_publish = ['0~2年', '2~5年', '5~10年', '10~15年', '15年以上']
 
-publish_bins = pd.DataFrame({'bins_publish': label_publish})
-application_train['publish_bins'] = pd.cut(
-    -application_train['DAYS_ID_PUBLISH'] / 365,
-    bins=bins_publish,
-    labels=label_publish,
-    right=False)
+DAYS_ID_PUBLISH_summary = pd.DataFrame({'bins': label_publish})
 
-# 统计每个箱子的违约率
-publish_bins['default_rate'] = publish_bins['bins_publish'].map(
-    application_train.groupby('publish_bins')['TARGET'].mean().map(lambda x: f"{x:.2%}")
-)
-publish_bins['population'] = publish_bins['bins_publish'].map(
-    application_train.groupby('publish_bins').size()
-)
-publish_bins['pop_default'] = publish_bins['bins_publish'].map(
-    application_train.groupby('publish_bins')['TARGET'].sum()
-)
+DAYS_ID_PUBLISH_summary = bins_stats(bins=bins_publish,
+                                     labels=label_publish,
+                                     column='DAYS_ID_PUBLISH',
+                                     df=DAYS_ID_PUBLISH_summary)
+
+del bins_publish, label_publish
 
 # 	bins_publish	default_rate	population	pop_default
 # 0	0~2年	10.17%	30735	3125
@@ -635,9 +659,182 @@ publish_bins['pop_default'] = publish_bins['bins_publish'].map(
 
 # 各组样本量充足，可以看出越临近申请日更改id文件的申请人违约率越高
 
-del bins_publish, label_publish, publish_bins
+del DAYS_BIRTH_summary, DAYS_EMPLOYED_summary, DAYS_ID_PUBLISH_summary
+
+# 分析 CNT_CHILDREN 这一字段
+# CNT_CHILDREN	count
+# 0	215371
+# 1	61119
+# 2	26749
+# 3	3717
+# 4	429
+# 5	84
+# 6	21
+# 7	7
+# 8	2
+# 9	2
+# 10	2
+# 11	1
+# 12	2
+# 14	3
+# 19	2
+
+application_train['CNT_CHILDREN'].describe()
+# count    307511.000000
+# mean          0.417052
+# std           0.722121
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           1.000000
+# max          19.000000
+# Name: CNT_CHILDREN, dtype: float64
+
+# 有少数的极端值，按业务含义分箱处理
+bins_children = [0, 1, 2, 3, np.inf]
+labels_children = ['0个孩子', '1个孩子', '2个孩子', '3个孩子及以上']
+
+CNT_CHILDREN_summary = pd.DataFrame({'bins': labels_children})
+CNT_CHILDREN_summary = bins_stats(bins_children,
+                                  labels_children,
+                                  'CNT_CHILDREN',
+                                  CNT_CHILDREN_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0个孩子	7.71%	215371	16609
+# 1	1个孩子	8.92%	61119	5454
+# 2	2个孩子	8.72%	26749	2333
+# 3	3个孩子及以上	10.04%	4272	429
+
+# 各组样本量充足，可以看出，违约率随孩子数量增长而增长
+
+# 分析 CNT_FAM_MEMBERS 字段
+# CNT_FAM_MEMBERS	count
+# 1	67847
+# 2	158357
+# 3	52601
+# 4	24697
+# 5	3478
+# 6	408
+# 7	81
+# 8	20
+# 9	6
+# 10	3
+# 11	1
+# 12	2
+# 13	1
+# 14	2
+# 15	1
+# 16	2
+# 20	2
+
+application_train['CNT_FAM_MEMBERS'].describe()
+# count    307509.0
+# mean     2.152665
+# std      0.910682
+# min           1.0
+# 25%           2.0
+# 50%           2.0
+# 75%           3.0
+# max          20.0
+# Name: CNT_FAM_MEMBERS, dtype: Float64
+bins_fam = [1, 2, 3, 4, 5, np.inf]
+labels_fam = ['1人', '2人', '3人', '4人', '5人及以上']
+
+CNT_FAM_MEMBERS_summary = pd.DataFrame({'bins': labels_fam})
+CNT_FAM_MEMBERS_summary = bins_stats(bins_fam,
+                                     labels_fam,
+                                     'CNT_FAM_MEMBERS',
+                                     CNT_FAM_MEMBERS_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	1人	8.36%	67847	5675
+# 1	2人	7.58%	158357	12009
+# 2	3人	8.76%	52601	4608
+# 3	4人	8.65%	24697	2136
+# 4	5人及以上	9.91%	4007	397
+
 del discrete_values_columns, discrete_values_frequency
+
 
 # 筛选 float 类型的字段，即连续型数值变量
 continuous_values_columns = application_train.select_dtypes(include='float').columns
 
+# 先分析第一类变量：收入、贷款金额及个人基本信息
+financial_basic_features_columns = continuous_values_columns[: 6]
+financial_basic_features = application_train[financial_basic_features_columns]
+
+# 描述性统计
+financial_basic_features_stats = financial_basic_features.describe()
+# 	AMT_INCOME_TOTAL	AMT_CREDIT	AMT_ANNUITY	AMT_GOODS_PRICE	REGION_POPULATION_RELATIVE	DAYS_REGISTRATION
+# count	307511.0	307511.0	307499.0	307233.0	307511.0	307511.0
+# mean	168797.9192969845	599025.9997057016	27108.573909183444	538396.2074288895	0.020868112057780035	-4986.120327538419
+# std	237123.14627885626	402490.77699585486	14493.737315118333	369446.46054005757	0.013831280122704704	3522.8863209630713
+# min	25650.0	45000.0	1615.5	40500.0	0.00029	-24672.0
+# 25%	112500.0	270000.0	16524.0	238500.0	0.010006	-7479.5
+# 50%	147150.0	513531.0	24903.0	450000.0	0.01885	-4504.0
+# 75%	202500.0	808650.0	34596.0	679500.0	0.028663	-2010.0
+# max	117000000.0	4050000.0	258025.5	4050000.0	0.072508	0.0
+
+# 绘制直方图
+sns.histplot(
+        data=financial_basic_features,
+        x='AMT_INCOME_TOTAL',
+        kde=True,
+        log_scale=True)
+
+sns.histplot(
+        data=financial_basic_features,
+        x='AMT_CREDIT',
+        kde=True)
+
+sns.histplot(
+        data=financial_basic_features,
+        x='AMT_ANNUITY',
+        kde=True)
+
+# 均为右偏的长尾分布，其中AMT_INCOME_TOTAL 右偏非常强烈
+
+# 绘制箱线图
+sns.boxplot(data=financial_basic_features, y="AMT_INCOME_TOTAL")
+
+sns.boxplot(data=financial_basic_features, y="AMT_CREDIT")
+
+sns.boxplot(data=financial_basic_features, y="AMT_ANNUITY")
+
+# 分箱进一步分析与违约率的关系
+def get_5_qcut(column):
+    application_train[f"{column}_bins"] = pd.qcut(
+        application_train[column],
+        q=5,
+        labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+    )
+    
+    default_rate = application_train.groupby([f"{column}_bins"])['TARGET'].mean()
+    
+    return default_rate.map(lambda x: f"{x:.2%}")
+
+get_5_qcut('AMT_INCOME_TOTAL')
+# AMT_INCOME_TOTAL_bins
+# Q1    8.21%
+# Q2    8.59%
+# Q3    8.68%
+# Q4    8.06%
+# Q5    6.52%
+# Name: TARGET, dtype: object
+get_5_qcut('AMT_CREDIT')
+# AMT_CREDIT_bins
+# Q1     7.24%
+# Q2     9.17%
+# Q3    10.05%
+# Q4     7.85%
+# Q5     6.08%
+# Name: TARGET, dtype: object
+get_5_qcut('AMT_ANNUITY')
+# AMT_ANNUITY_bins
+# Q1    6.95%
+# Q2    8.58%
+# Q3    8.79%
+# Q4    9.34%
+# Q5    6.70%
+# Name: TARGET, dtype: object
