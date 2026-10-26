@@ -1,3 +1,80 @@
+# 风控建模中最重要的8类变量
+
+# 1. 还款能力变量（核心）
+# 反映客户有没有钱还款，是信用风险最基础的判断维度。
+# - 收入：月收入、工资流水、收入稳定性
+# - 负债：当前负债、月还款额、负债收入比（DTI）
+# - 现金流：月均流入、月均流出、账户余额、现金流波动
+# - 资产：存款、房产、可变现资产
+# 业务逻辑： 收入不稳定、负债过高、现金流持续恶化，通常意味着违约风险上升。
+
+# 2. 历史信用表现变量（核心）
+# 反映客户过去是否有履约意愿和履约能力。
+# - 历史逾期次数、最大逾期天数
+# - 历史 M1、M2、M3 逾期记录
+# - 近 3/6/12 个月逾期次数
+# - 历史结清情况、核销情况
+# - 信用账户数量、信贷历史长度
+# 业务逻辑： 近期发生的严重逾期，通常比很久以前的一次轻微逾期更值得关注。逾期的严重程度、频率和距今时间都很重要。
+
+# 3. 多头借贷与负债压力变量
+# 反映客户是否在多个机构借款，以及是否存在过度借贷。
+# - 当前在贷机构数
+# - 近 7/30/90 天贷款申请次数
+# - 近 30 天新增借款次数
+# - 总授信额度、已用额度、额度使用率
+# - 多平台借款频率、短期借款增长率
+# 业务逻辑： 短期内频繁申请贷款、多个平台同时新增借款，可能意味着资金压力增加。
+# 注意：多头不一定等于高风险，要结合客户收入、存量负债和借款用途判断。
+
+# 4. 申请行为与借款行为变量
+# 反映客户在什么情况下申请贷款，以及借款行为是否异常。
+# - 申请时间、申请频率
+# - 申请金额、期限、选择的产品
+# - 重复申请、短时间多次修改申请信息
+# - 额度使用和支用行为
+# - 借款后是否迅速再次借款
+# 业务逻辑： 单次申请金额突然升高、短期反复申请，可能反映资金需求发生变化，但也可能是正常的消费或经营需求。
+
+# 5. 身份真实性与反欺诈变量
+# 反映客户是否真实、申请行为是否存在欺诈风险。
+# - 设备关联账号数
+# - IP、设备、手机号、身份证的关联关系
+# - 注册到申请的时间间隔
+# - 设备环境异常、模拟器或自动化行为
+# - 身份信息与外部数据的一致性
+# 业务逻辑： 同一设备关联大量无明显合理关系的申请人，可能存在团伙欺诈或批量注册风险。
+# 这一类变量对反欺诈模型尤其重要，对纯粹的违约概率模型则要看数据和业务场景。
+
+# 6. 账户与交易行为变量
+# 反映客户近期财务状况、消费模式和行为变化。
+# - 日均余额、余额波动率
+# - 入账金额、出账金额、净现金流
+# - 交易频次、交易金额分布
+# - 工资入账规律、异常大额交易
+# - 账户活跃度、交易对手集中度
+# 业务逻辑： 比起单一时点的余额，持续多月的现金流趋势可能更有解释力。收入突然下降、余额持续减少等变化值得关注。
+
+# 7. 产品与借款条件变量
+# 反映客户承担的还款压力，以及不同产品本身的风险差异。
+# - 借款金额、期限、利率
+# - 月供金额、还款方式
+# - 额度、首借或复借
+# - 抵押物价值、贷款价值比（LTV）
+# - 产品类型、渠道、资金方
+# 业务逻辑： 相同的客户在不同贷款金额、期限和月供下，可能面临不同的违约风险。
+# 特别注意：产品、渠道等变量可能捕捉到的是业务准入规则或历史客群差异，不一定是客户自身的风险特征。
+
+# 8. 时间变化与趋势变量
+# 这是很多建模人员容易低估的一类变量。
+# - 近 7/30/90 天申请次数
+# - 近 3 个月负债增长率
+# - 最近一次逾期距今天数
+# - 收入环比变化
+# - 近期与历史平均行为的偏离程度
+# 业务逻辑： 客户当前的风险状态可能比几年前的静态画像更重要。
+# 例如，同样有 5 笔贷款，一个客户负债稳定且按时还款，另一个客户近一个月突然新增 4 笔贷款，两者的风险可能完全不同。
+
 # %%
 # 库
 from pathlib import Path
@@ -21,22 +98,82 @@ cols_meaning = pd.read_csv(DATA_PATH / 'HomeCredit_columns_description.csv',
                            usecols=['Table', 'Row', 'Description'])
 cols_meaning = cols_meaning[cols_meaning['Table'] == 'application_{train|test}.csv']
 
+
+# %%
+# 异常值函数
+def get_outlier(s):
+    Q_1 = s.quantile(0.25)
+    Q_3 = s.quantile(0.75)
+    IQR = Q_3 - Q_1
+
+    outlier = s[(s < Q_1 - 1.5 * IQR)
+                | (s > Q_3 + 1.5 * IQR)]
+    return outlier
+
+
+# 离散变量分箱函数
+def bins_stats(bins: list, labels: list, column: str, df: pd.DataFrame) -> pd.DataFrame():
+    if column.startswith('DAYS_'):
+        data = -application_train[column] / 365
+    else:
+        data = application_train[column]
+
+    application_train[f"{column}_bins"] = pd.cut(
+        x=data,
+        bins=bins,
+        labels=labels,
+        right=False
+    )
+    
+    if application_train[f"{column}_bins"].isna().any():
+        application_train[f"{column}_bins"] = \
+            application_train[f"{column}_bins"].cat.add_categories(['特殊编码组']).fillna('特殊编码组')
+    
+    # 统计不同箱子违约率
+    df['default_rate'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins")['TARGET'].mean().map(lambda x: f"{x:.2%}")
+    )
+    # 统计不同箱子样本量
+    df['population'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins").size()
+    )
+    # 统计不同箱子的违约样本量
+    df['pop_default'] = df['bins'].map(
+        application_train.groupby(f"{column}_bins")['TARGET'].sum()
+    )
+    
+    return df
+
+
+# 连续变量5等分等频分箱函数
+def get_5_qcut(column):
+    application_train[f"{column}_bins"] = pd.qcut(
+        application_train[column],
+        q=5,
+        labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+    )
+    
+    default_rate = application_train.groupby([f"{column}_bins"])['TARGET'].mean()
+    
+    return default_rate.map(lambda x: f"{x:.2%}")
+
+
 # %%
 "一、数据概况与数据质量"
 
 "数据规模、目标变量、缺失值、重复值、异常值、训练集和测试集差异。"
 
 # -- 数据规模 --
-print(application_train.shape)
+# print(application_train.shape)
 # (307511, 122)
 # application_train 样本量为307511，含有122个字段
 
-print(application_test.shape)
+# print(application_test.shape)
 # (48744, 121)
 # application_test 样本量为48744，含有121个字段
 
 # 检查测试集的字段是否和训练集一致
-print(set(application_test.columns).issubset(set(application_train.columns)))
+# print(set(application_test.columns).issubset(set(application_train.columns)))
 # True
 
 # -- 数据类型 --
@@ -44,7 +181,7 @@ cols_train_types = application_train.dtypes
 cols_test_types = application_test.dtypes
 
 # 检查测试集字段类型是否和训练集一致
-print(cols_train_types.drop('TARGET').equals(cols_test_types))
+# print(cols_train_types.drop('TARGET').equals(cols_test_types))
 # True
 
 '''SK_ID_CURR 转换为 str
@@ -58,23 +195,27 @@ application_train['OWN_CAR_AGE'] = application_train['OWN_CAR_AGE'].astype('Int6
 
 
 # -- 重复与唯一性 --
-print(application_train.duplicated().any())
+# print(application_train.duplicated().any())
 # False
-print(application_train.duplicated(subset='SK_ID_CURR').any())
+# print(application_train.duplicated(subset='SK_ID_CURR').any())
 # False
-print(application_test.duplicated().any())
+# print(application_test.duplicated().any())
 # False
-# -> 无重复
+" -> 无重复"
 
-del cols_test_types, cols_train_types
+del cols_train_types, cols_test_types
 
 # -- 缺失率情况 --
 missing_summary = application_train.isna().mean().reset_index(name='missing_rate')
-missing_summary = missing_summary[missing_summary['missing_rate'] > 0].reset_index(drop=True)
 
+# 没有缺失的列
+present_columns = missing_summary.loc[missing_summary['missing_rate'] == 0, 'index'].tolist()
+
+# 缺失的列
+missing_summary = missing_summary[missing_summary['missing_rate'] > 0].reset_index(drop=True)
 missing_columns = missing_summary['index'].tolist()
 
-missing_summary.sort_values(by='missing_rate', ascending=False).head(20)
+# missing_summary.sort_values(by='missing_rate', ascending=False).head(20)
 #                        index  missing_rate
 # 41           COMMONAREA_MEDI      0.698723
 # 13            COMMONAREA_AVG      0.698723
@@ -97,28 +238,28 @@ missing_summary.sort_values(by='missing_rate', ascending=False).head(20)
 # 46             LANDAREA_MEDI      0.593767
 # 32             LANDAREA_MODE      0.593767
 
-# 注意到 COMMONAREA_ NONLIVINGAPARTMENTS_ LIVINGAPARTMENTS_ FLOORSMIN_ 等缺失率相同
-# 可能是相同的缺失模式
+'''注意到 COMMONAREA_ NONLIVINGAPARTMENTS_ LIVINGAPARTMENTS_ FLOORSMIN_ 等缺失率相同
+    可能是相同的缺失模式'''
 
 # 进一步探究缺失模式
-same_missing_pattern_groups = []
+# same_missing_pattern_groups = []
 
-for rate, group in missing_summary.groupby('missing_rate'):
+# for rate, group in missing_summary.groupby('missing_rate'):
     
-    if len(group) > 1:
-        temp_list = group['index'].tolist()
-        temp_df = application_train[temp_list]
+#     if len(group) > 1:
+#         temp_list = group['index'].tolist()
+#         temp_df = application_train[temp_list]
         
-        if len(temp_df.isna().T.drop_duplicates()) == 1:
-            same_missing_pattern_groups.append(temp_list)
-        else:
-            print(f"{temp_list}的缺失模式不同")
+#         if len(temp_df.isna().T.drop_duplicates()) == 1:
+#             same_missing_pattern_groups.append(temp_list)
+#         else:
+#             print(f"{temp_list}的缺失模式不同")
 
-del rate, group, temp_df, temp_list, same_missing_pattern_groups
+# del rate, group, temp_df, temp_list, same_missing_pattern_groups
 
 " -> 相同缺失率的字段缺失模式都相同"
 
-missing_summary.groupby('missing_rate').head(1).sort_values(by='missing_rate', ascending=False)
+# missing_summary.groupby('missing_rate').head(1).sort_values(by='missing_rate', ascending=False)
 #                           index  missing_rate
 # 13               COMMONAREA_AVG      0.698723
 # 21      NONLIVINGAPARTMENTS_AVG      0.694330
@@ -164,25 +305,28 @@ missing_summary = missing_summary.drop(columns='index')
     -> 说明一部分申请人缺少相关房屋信息，而不是数据随机缺失 '''
 
 # 去除房屋相关字段后，其余高缺失率变量
-missing_summary.loc[
-    ~missing_summary['Description'].str.startswith('Normalized'),
-    ['Row', 'missing_rate']
-].sort_values(by='missing_rate', ascending=False)
+# missing_summary.loc[
+#     ~missing_summary['Description'].str.startswith('Normalized information'),
+#     ['Row', 'missing_rate']
+# ].sort_values(by='missing_rate', ascending=False)
 
 #                            Row  missing_rate
 # 3                  OWN_CAR_AGE      0.659908
+# 6                 EXT_SOURCE_1      0.563811
 # 4              OCCUPATION_TYPE      0.313455
+# 8                 EXT_SOURCE_3      0.198253
 # 66  AMT_REQ_CREDIT_BUREAU_YEAR      0.135016
-# 61  AMT_REQ_CREDIT_BUREAU_HOUR      0.135016
 # 65   AMT_REQ_CREDIT_BUREAU_QRT      0.135016
 # 64   AMT_REQ_CREDIT_BUREAU_MON      0.135016
 # 63  AMT_REQ_CREDIT_BUREAU_WEEK      0.135016
 # 62   AMT_REQ_CREDIT_BUREAU_DAY      0.135016
+# 61  AMT_REQ_CREDIT_BUREAU_HOUR      0.135016
 # 2              NAME_TYPE_SUITE      0.004201
-# 58    OBS_60_CNT_SOCIAL_CIRCLE      0.003320
 # 59    DEF_60_CNT_SOCIAL_CIRCLE      0.003320
 # 57    DEF_30_CNT_SOCIAL_CIRCLE      0.003320
+# 58    OBS_60_CNT_SOCIAL_CIRCLE      0.003320
 # 56    OBS_30_CNT_SOCIAL_CIRCLE      0.003320
+# 7                 EXT_SOURCE_2      0.002146
 # 1              AMT_GOODS_PRICE      0.000904
 # 0                  AMT_ANNUITY      0.000039
 # 5              CNT_FAM_MEMBERS      0.000007
@@ -272,7 +416,8 @@ for rate, group in missing_impact_summary.groupby('missing_rate'):
             print(f"{temp_list}的坏样本率不同")
 
 del temp_list, temp_s, group, rate
-" 坏样本率都相同"
+
+"相同缺失率的字段，坏样本率都相同"
 
 del missing_columns, missing_summary
 
@@ -324,15 +469,6 @@ del missing_impact_summary
 
 # -- 异常值分析 --
 # 针对数值变量
-def get_outlier(s):
-    Q_1 = s.quantile(0.25)
-    Q_3 = s.quantile(0.75)
-    IQR = Q_3 - Q_1
-
-    outlier = s[(s < Q_1 - 1.5 * IQR)
-                | (s > Q_3 + 1.5 * IQR)]
-    return outlier
-
 nm_df = application_train.select_dtypes(exclude='object')
 outliers_dict = {col: get_outlier(nm_df[col])
                  for col in nm_df.columns}
@@ -360,9 +496,9 @@ print(application_train['TARGET'].mean())
 # -> 样本存在类别不平衡
 
 # %%
-"三、单变量分布分析"
+"三、单变量分析"
 
-"年龄、收入、贷款金额、工作年限、家庭情况等变量的分布。"
+"年龄、收入、贷款金额、工作年限、家庭情况等变量。"
 
 '''
 
@@ -383,7 +519,8 @@ print(application_train['TARGET'].mean())
 3.检查稀有类别和缺失值。
 
 '''
-# 筛选 int 类型的字段：包含0/1分类变量，离散数值变量
+
+"筛选 int 类型的字段：包含0/1分类变量，离散数值变量"
 discrete_values_columns = application_train.select_dtypes(include='int').columns
 
 discrete_values_frequency = {}
@@ -558,39 +695,6 @@ sns.histplot(x=-discrete_values_frequency['DAYS_ID_PUBLISH'].index / 365,
 # 进行分箱判断与 TARGET 的关系
 # 分箱方法有业务含义分箱、等宽分箱、等频分箱
 
-# 一般处理函数
-def bins_stats(bins: list, labels: list, column: str, df: pd.DataFrame) -> pd.DataFrame():
-    if column.startswith('DAYS_'):
-        data = -application_train[column] / 365
-    else:
-        data = application_train[column]
-
-    application_train[f"{column}_bins"] = pd.cut(
-        x=data,
-        bins=bins,
-        labels=labels,
-        right=False
-    )
-    
-    if application_train[f"{column}_bins"].isna().any():
-        application_train[f"{column}_bins"] = \
-            application_train[f"{column}_bins"].cat.add_categories(['特殊编码组']).fillna('特殊编码组')
-    
-    # 统计不同箱子违约率
-    df['default_rate'] = df['bins'].map(
-        application_train.groupby(f"{column}_bins")['TARGET'].mean().map(lambda x: f"{x:.2%}")
-    )
-    # 统计不同箱子样本量
-    df['population'] = df['bins'].map(
-        application_train.groupby(f"{column}_bins").size()
-    )
-    # 统计不同箱子的违约样本量
-    df['pop_default'] = df['bins'].map(
-        application_train.groupby(f"{column}_bins")['TARGET'].sum()
-    )
-    
-    return df
-
 # DAYS_BIRTH 取值范围为20~70，按业务含义分箱，20~29，30~39一个箱子
 bins_birth = [20, 30, 40, 50, 60, np.inf]
 labels_birth = ['20~29岁', '30~39岁', '40~49岁', '50岁~59岁', '60岁以上']
@@ -757,15 +861,15 @@ CNT_FAM_MEMBERS_summary = bins_stats(bins_fam,
 del discrete_values_columns, discrete_values_frequency
 
 
-# 筛选 float 类型的字段，即连续型数值变量
+"筛选 float 类型的字段，即连续型数值变量"
 continuous_values_columns = application_train.select_dtypes(include='float').columns
 
-# 先分析第一类变量：收入、贷款金额及个人基本信息
+# 先分析第一类变量
+# 1.收入、贷款金额及个人基本信息
 financial_basic_features_columns = continuous_values_columns[: 6]
-financial_basic_features = application_train[financial_basic_features_columns]
 
 # 描述性统计
-financial_basic_features_stats = financial_basic_features.describe()
+financial_basic_features_stats = application_train[financial_basic_features_columns].describe()
 # 	AMT_INCOME_TOTAL	AMT_CREDIT	AMT_ANNUITY	AMT_GOODS_PRICE	REGION_POPULATION_RELATIVE	DAYS_REGISTRATION
 # count	307511.0	307511.0	307499.0	307233.0	307511.0	307511.0
 # mean	168797.9192969845	599025.9997057016	27108.573909183444	538396.2074288895	0.020868112057780035	-4986.120327538419
@@ -778,42 +882,35 @@ financial_basic_features_stats = financial_basic_features.describe()
 
 # 绘制直方图
 sns.histplot(
-        data=financial_basic_features,
-        x='AMT_INCOME_TOTAL',
-        kde=True,
-        log_scale=True)
+    data=application_train,
+    x='AMT_INCOME_TOTAL',
+    kde=True,
+    log_scale=True)
 
 sns.histplot(
-        data=financial_basic_features,
-        x='AMT_CREDIT',
-        kde=True)
+    data=application_train,
+    x='AMT_CREDIT',
+    kde=True)
 
 sns.histplot(
-        data=financial_basic_features,
-        x='AMT_ANNUITY',
-        kde=True)
+    data=application_train,
+    x='AMT_ANNUITY',
+    kde=True)
+
+sns.histplot(
+    data=application_train,
+    x='AMT_GOODS_PRICE',
+    kde=True)
 
 # 均为右偏的长尾分布，其中AMT_INCOME_TOTAL 右偏非常强烈
 
 # 绘制箱线图
-sns.boxplot(data=financial_basic_features, y="AMT_INCOME_TOTAL")
-
-sns.boxplot(data=financial_basic_features, y="AMT_CREDIT")
-
-sns.boxplot(data=financial_basic_features, y="AMT_ANNUITY")
+sns.boxplot(data=application_train, y="AMT_INCOME_TOTAL")
+sns.boxplot(data=application_train, y="AMT_CREDIT")
+sns.boxplot(data=application_train, y="AMT_ANNUITY")
+sns.boxplot(data=application_train, y="AMT_GOODS_PRICE")
 
 # 分箱进一步分析与违约率的关系
-def get_5_qcut(column):
-    application_train[f"{column}_bins"] = pd.qcut(
-        application_train[column],
-        q=5,
-        labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5']
-    )
-    
-    default_rate = application_train.groupby([f"{column}_bins"])['TARGET'].mean()
-    
-    return default_rate.map(lambda x: f"{x:.2%}")
-
 get_5_qcut('AMT_INCOME_TOTAL')
 # AMT_INCOME_TOTAL_bins
 # Q1    8.21%
@@ -838,3 +935,154 @@ get_5_qcut('AMT_ANNUITY')
 # Q4    9.34%
 # Q5    6.70%
 # Name: TARGET, dtype: object
+get_5_qcut('AMT_GOODS_PRICE')
+# AMT_GOODS_PRICE_bins
+# Q1     8.01%
+# Q2     8.79%
+# Q3    10.38%
+# Q4     7.58%
+# Q5     5.73%
+# Name: TARGET, dtype: object
+
+# 以上四个变量对应的分组违约率均呈现非单调变化，这些变量与违约风险之间可能存在非线性关联
+
+# 进一步分析这四个变量间相关性，计算相关系数矩阵
+AMT_corr = application_train[
+    ['AMT_INCOME_TOTAL', 'AMT_CREDIT', 'AMT_ANNUITY', 'AMT_GOODS_PRICE']
+    ].corr().round(2)
+
+# AMT_INCOME_TOTAL	AMT_CREDIT	AMT_ANNUITY	AMT_GOODS_PRICE
+# AMT_INCOME_TOTAL	1.0	0.16	0.19	0.16
+# AMT_CREDIT	0.16	1.0	0.77	0.99
+# AMT_ANNUITY	0.19	0.77	1.0	0.78
+# AMT_GOODS_PRICE	0.16	0.99	0.78	1.0
+
+# 可以发现 AMT_CREDIT 和 AMT_GOODS_PRICE 相关系数极高，存在重复信息
+# AMT_GOODS_PRICE 和 AMT_ANNUITY，AMT_CREDIT 和 AMT_ANNUITY 也有较强的线性相关关系
+
+# 分析 REGION_POPULATION_RELATIVE
+get_5_qcut('REGION_POPULATION_RELATIVE')
+# REGION_POPULATION_RELATIVE_bins
+# Q1    8.94%
+# Q2    7.92%
+# Q3    9.55%
+# Q4    7.73%
+# Q5    6.00%
+# Name: TARGET, dtype: object
+# 可能与违约率存在非线性关系
+
+# 分析 DAYS_REGISTRATION
+(-application_train['DAYS_REGISTRATION'] / 365).describe()
+# count    307511.000000
+# mean         13.660604
+# std           9.651743
+# min          -0.000000
+# 25%           5.506849
+# 50%          12.339726
+# 75%          20.491781
+# max          67.594521
+# Name: DAYS_REGISTRATION, dtype: float64
+
+# 分箱进一步分析
+DAYS_REGISTRATION_bins = [0, 2, 5, 10, 20, np.inf]
+DAYS_REGISTRATION_labels = ['0-2年', '2-5年', '5-10年', '10-20年', '20年以上']
+DAYS_REGISTRATION_summary = pd.DataFrame({'bins': DAYS_REGISTRATION_labels})
+
+bins_stats(DAYS_REGISTRATION_bins,
+           DAYS_REGISTRATION_labels,
+           'DAYS_REGISTRATION',
+           DAYS_REGISTRATION_summary)
+
+#      bins default_rate  population  pop_default
+# 0    0-2年        9.64%       32432         3127
+# 1    2-5年        8.80%       39133         3445
+# 2   5-10年        8.72%       54618         4762
+# 3  10-20年        8.31%      100662         8370
+# 4   20年以上        6.35%       80666         5121
+
+# DAYS_REGISTRATION 呈现出比较清晰的违约率随登记年限增加而总体下降的趋势，而且各组样本量都比较充足
+del DAYS_REGISTRATION_bins, DAYS_REGISTRATION_labels, DAYS_REGISTRATION_summary
+del financial_basic_features_columns
+
+
+# 2.分析外部信用评分变量
+ext_score_cols = ['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']
+# 	missing_rate	Row
+# 8	0.19825307062186392	EXT_SOURCE_3
+# 7	0.0021462646864665006	EXT_SOURCE_2
+# 6	0.5638107254699832	EXT_SOURCE_1
+
+
+
+
+# 3.房产及居住变量
+# 由前面的分析可知，房产相关变量的缺失模式相同，进行相关性分析
+house_cols = cols_meaning.loc[
+    cols_meaning['Description'].str.startswith('Normalized information'),
+    'Row'
+].tolist()
+
+house_corr = application_train[house_cols].select_dtypes(include=['number']).corr().round(2)
+upper_mask = np.triu(np.ones(house_corr.shape), k=1).astype(bool)
+house_corr = house_corr.where(upper_mask)
+
+# 查看0.9以上的
+temp_df = house_corr.stack().reset_index()
+result = temp_df[temp_df[0].between(0.9, 1)]
+
+# 	level_0	level_1	0
+# 9	APARTMENTS_AVG	LIVINGAPARTMENTS_AVG	0.94
+# 10	APARTMENTS_AVG	LIVINGAREA_AVG	0.91
+# 13	APARTMENTS_AVG	APARTMENTS_MODE	0.97
+# 23	APARTMENTS_AVG	LIVINGAPARTMENTS_MODE	0.93
+# 27	APARTMENTS_AVG	APARTMENTS_MEDI	1.0
+# 37	APARTMENTS_AVG	LIVINGAPARTMENTS_MEDI	0.94
+# 38	APARTMENTS_AVG	LIVINGAREA_MEDI	0.91
+# 55	BASEMENTAREA_AVG	BASEMENTAREA_MODE	0.97
+# 69	BASEMENTAREA_AVG	BASEMENTAREA_MEDI	0.99
+# 96	YEARS_BEGINEXPLUATATION_AVG	YEARS_BEGINEXPLUATATION_MODE	0.97
+# 110	YEARS_BEGINEXPLUATATION_AVG	YEARS_BEGINEXPLUATATION_MEDI	0.99
+# 136	YEARS_BUILD_AVG	YEARS_BUILD_MODE	0.99
+
+# 查看0.8到0.9
+result = temp_df[temp_df[0].between(0.8, 0.9, inclusive='left')]
+# 	level_0	level_1	0
+# 4	APARTMENTS_AVG	ELEVATORS_AVG	0.84
+# 18	APARTMENTS_AVG	ELEVATORS_MODE	0.82
+# 24	APARTMENTS_AVG	LIVINGAREA_MODE	0.89
+# 32	APARTMENTS_AVG	ELEVATORS_MEDI	0.84
+# 41	APARTMENTS_AVG	TOTALAREA_MODE	0.89
+# 204	ELEVATORS_AVG	LIVINGAPARTMENTS_AVG	0.81
+# 205	ELEVATORS_AVG	LIVINGAREA_AVG	0.87
+# 208	ELEVATORS_AVG	APARTMENTS_MODE	0.81
+# 218	ELEVATORS_AVG	LIVINGAPARTMENTS_MODE	0.8
+# 219	ELEVATORS_AVG	LIVINGAREA_MODE	0.84
+# 222	ELEVATORS_AVG	APARTMENTS_MEDI	0.83
+# 232	ELEVATORS_AVG	LIVINGAPARTMENTS_MEDI	0.81
+# 233	ELEVATORS_AVG	LIVINGAREA_MEDI	0.87
+# 236	ELEVATORS_AVG	TOTALAREA_MODE	0.84
+# 375	LIVINGAPARTMENTS_AVG	LIVINGAREA_AVG	0.88
+# 389	LIVINGAPARTMENTS_AVG	LIVINGAREA_MODE	0.85
+# 397	LIVINGAPARTMENTS_AVG	ELEVATORS_MEDI	0.81
+# 403	LIVINGAPARTMENTS_AVG	LIVINGAREA_MEDI	0.88
+# 406	LIVINGAPARTMENTS_AVG	TOTALAREA_MODE	0.85
+# 409	LIVINGAREA_AVG	APARTMENTS_MODE	0.89
+# 414	LIVINGAREA_AVG	ELEVATORS_MODE	0.85
+# 419	LIVINGAREA_AVG	LIVINGAPARTMENTS_MODE	0.87
+# 428	LIVINGAREA_AVG	ELEVATORS_MEDI	0.87
+# 433	LIVINGAREA_AVG	LIVINGAPARTMENTS_MEDI	0.88
+# 501	APARTMENTS_MODE	ELEVATORS_MODE	0.83
+# 515	APARTMENTS_MODE	ELEVATORS_MEDI	0.81
+# 521	APARTMENTS_MODE	LIVINGAREA_MEDI	0.89
+# 524	APARTMENTS_MODE	TOTALAREA_MODE	0.86
+# 631	ELEVATORS_MODE	LIVINGAPARTMENTS_MODE	0.81
+# 632	ELEVATORS_MODE	LIVINGAREA_MODE	0.86
+# 635	ELEVATORS_MODE	APARTMENTS_MEDI	0.83
+# 645	ELEVATORS_MODE	LIVINGAPARTMENTS_MEDI	0.8
+# 646	ELEVATORS_MODE	LIVINGAREA_MEDI	0.86
+
+# 说明房产及居住变量之间存在很强的相关性，APARTMENTS_AVG	APARTMENTS_MEDI的相关系数达到了1
+
+del house_cols, house_corr, temp_df, upper_mask, result
+
+# 4.

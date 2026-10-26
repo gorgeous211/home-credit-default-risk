@@ -45,12 +45,19 @@ feature_importance = np.zeros(X.shape[1])
 
 # learning_rate、n_estimators根据经验确定，min_child_sample根据数据集确定
 # max_depth、num_leaves、subsample、colsample_bytree、reg_alpha、reg_lambda通过算法搜索参数
+
+# max_depth: 一般在3，4，5中取一个
+# num_leaves: LightGBM中与max_depth配合，要小于2^max_depth-1
+# subsample: 一般给出大致的搜索范围如[0.8, 0.9, 1.0]这样几个比较整的数值
+# colsample_bytree: 与subsample同理
+# reg_alpha与reg_lambda，一般在1-1000的范围调参，比较好的模型上这俩参数值不应该过大，尤其是reg_alpha，过大的话需要查看特征
+
 # 对抗验证不需要网络搜索调参，重点防止过拟合，避免捕捉虚假漂移
 params = { 
     # 复杂度控制参数
     # 浅树更倾向于捕捉全局性特征分布差异，避免深树在叶节点上对个别样本强行切分
     'max_depth': 5,             # 默认-1，树的最大深度， 一般在3、4、5这三个数里挑一个
-    'num_leaves': 31,           # 默认31，树的最大叶子数，经验取<=2^max_depth-1=2^5-1=31
+    'num_leaves': 31,           # 默认31，树的最大叶子数，取<=2^max_depth-1=2^5-1=31
     'min_child_samples': 50,     # 默认20，单个叶子节点上所需的最小样本数
                                 # 调大该参数，防止叶节点样本数过少导致的局部过拟合
                                 
