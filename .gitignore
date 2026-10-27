@@ -9,7 +9,5 @@ __pycache__/
 *.tmp
 *.swp
 
-# 数据集及生成结果
-/data/
-/outputs/
-/models/
+# 原始数据集
+/data/raw/

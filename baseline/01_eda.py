@@ -1,3 +1,4 @@
+# %%
 # 风控建模中最重要的8类变量
 
 # 1. 还款能力变量（核心）
@@ -94,12 +95,40 @@ application_train = pd.read_csv(DATA_PATH / 'raw' / 'application_train.csv')
 application_test = pd.read_csv(DATA_PATH / 'raw' / 'application_test.csv')
 
 # 字段含义
-cols_meaning = pd.read_csv(DATA_PATH / 'HomeCredit_columns_description.csv',
-                           usecols=['Table', 'Row', 'Description'])
-cols_meaning = cols_meaning[cols_meaning['Table'] == 'application_{train|test}.csv']
+# cols_meaning = pd.read_csv(DATA_PATH / 'HomeCredit_columns_description.csv',
+#                            usecols=['Table', 'Row', 'Description'],
+#                            encoding="latin1")
+# cols_meaning = cols_meaning[cols_meaning['Table'] == 'application_{train|test}.csv']
 
+# 缺失率报告
+cols_missinig_report = pd.read_csv(DATA_PATH / 'interim' / 'missing_impact_summary.csv')
+
+# 随着eda阶段逐步更新
+cols_eda = pd.read_csv(DATA_PATH / 'interim' / 'cols_eda.csv')
 
 # %%
+
+# 两样本比例之差检验函数
+def run_ztest_row(row):
+    col_default_n_missing = 'default_numbers_when_missing'
+    col_n_missing = 'numbers_when_missing'
+    col_default_n_present = 'default_numbers_when_present'
+    col_n_present = 'numbers_when_present'
+    
+    n_default_miss = row[col_default_n_missing]
+    n_default_pres = row[col_default_n_present]
+    
+    n_miss = row[col_n_missing]
+    n_pres = row[col_n_present]
+    
+    stat, pval = proportions_ztest(
+        count=[n_default_miss, n_default_pres],
+        nobs=[n_miss, n_pres],
+        alternative='two-sided')
+    
+    return pd.Series({'z_stat': stat, 'p_value': pval})
+
+
 # 异常值函数
 def get_outlier(s):
     Q_1 = s.quantile(0.25)
@@ -112,7 +141,7 @@ def get_outlier(s):
 
 
 # 离散变量分箱函数
-def bins_stats(bins: list, labels: list, column: str, df: pd.DataFrame) -> pd.DataFrame():
+def bins_stats(bins: list, labels: list, column: str, df: pd.DataFrame) -> pd.DataFrame:
     if column.startswith('DAYS_'):
         data = -application_train[column] / 365
     else:
@@ -177,8 +206,12 @@ def get_5_qcut(column):
 # True
 
 # -- 数据类型 --
-cols_train_types = application_train.dtypes
-cols_test_types = application_test.dtypes
+cols_train_types = application_train.dtypes.rename('dtypes')
+cols_test_types = application_test.dtypes.rename('dtypes')
+
+# 添加数据类型到 cols_eda
+# cols_eda = cols_meaning.copy()
+# cols_eda['dtypes'] = cols_eda['Row'].map(cols_train_types)
 
 # 检查测试集字段类型是否和训练集一致
 # print(cols_train_types.drop('TARGET').equals(cols_test_types))
@@ -188,6 +221,12 @@ cols_test_types = application_test.dtypes
    CNT_FAM_MEMBERS 转换为 int
    OWN_CAR_AGE 转换为 int
    其余变量不需要转换'''
+
+# 结论更新到 cols_eda 中
+# cols_eda['to_dtypes'] = np.nan
+# cols_eda.loc[cols_eda['Row'] == 'SK_ID_CURR', 'to_dtypes'] = 'str'
+# cols_eda.loc[cols_eda['Row'] == 'CNT_FAM_MEMBERS', 'to_dtypes'] = 'int'
+# cols_eda.loc[cols_eda['Row'] == 'OWN_CAR_AGE', 'to_dtypes'] = 'int'
 
 application_train['SK_ID_CURR'] = application_train['SK_ID_CURR'].astype(str)
 application_train['CNT_FAM_MEMBERS'] = application_train['CNT_FAM_MEMBERS'].astype('Int64')
@@ -206,14 +245,15 @@ application_train['OWN_CAR_AGE'] = application_train['OWN_CAR_AGE'].astype('Int6
 del cols_train_types, cols_test_types
 
 # -- 缺失率情况 --
-missing_summary = application_train.isna().mean().reset_index(name='missing_rate')
+missing_summary = application_train.isna().mean().reset_index()
+missing_summary.columns = ['Row', 'missing_rate']
 
 # 没有缺失的列
-present_columns = missing_summary.loc[missing_summary['missing_rate'] == 0, 'index'].tolist()
+present_columns = missing_summary.loc[missing_summary['missing_rate'] == 0, 'Row'].tolist()
 
 # 缺失的列
 missing_summary = missing_summary[missing_summary['missing_rate'] > 0].reset_index(drop=True)
-missing_columns = missing_summary['index'].tolist()
+missing_columns = missing_summary['Row'].tolist()
 
 # missing_summary.sort_values(by='missing_rate', ascending=False).head(20)
 #                        index  missing_rate
@@ -294,12 +334,9 @@ missing_columns = missing_summary['index'].tolist()
 # 60       DAYS_LAST_PHONE_CHANGE      0.000003
 
 missing_summary = missing_summary.merge(
-    cols_meaning.drop(columns='Table'),
-    left_on='index',
-    right_on='Row',
+    cols_eda[['Row', 'Description']],
+    on='Row',
     how='left')
-
-missing_summary = missing_summary.drop(columns='index')
 
 ''' -> 缺失率较高的字段大部分是与房屋相关
     -> 说明一部分申请人缺少相关房屋信息，而不是数据随机缺失 '''
@@ -336,7 +373,7 @@ missing_summary = missing_summary.drop(columns='index')
 sns.barplot(
     data=missing_summary.sort_values(by='missing_rate', ascending=False).head(30),
     x='missing_rate',
-    y='missing_cols')
+    y='Row')
 
 sns.barplot(
     data=missing_summary.loc[
@@ -348,47 +385,51 @@ sns.barplot(
 
 # 缺失率分析
 default_rate_when_missing = []     # 缺失组违约率
-missing_numbers_when_missing = []  # 缺失组样本量
-default_numbers_when_missing = []  # 缺失组违约样本率
+numbers_when_missing = []  # 缺失组样本量
+default_numbers_when_missing = []  # 缺失组违约样本量
 
 for col in missing_columns:
     temp_df = application_train[[col, 'TARGET']]
     
+    # 计算违约率
     default_rate = temp_df.loc[temp_df[col].isna(), 'TARGET'].mean()
-    missing_number = len(temp_df[temp_df[col].isna()])
+    # 计算样本量
+    number = len(temp_df[temp_df[col].isna()])
+    # 计算违约样本量
     default_number = temp_df.loc[temp_df[col].isna(), 'TARGET'].sum()
     
     default_rate_when_missing.append(default_rate)
-    missing_numbers_when_missing.append(missing_number)
+    numbers_when_missing.append(number)
     default_numbers_when_missing.append(default_number)
 
 default_rate_when_present = []     # 正常组违约率
-missing_numbers_when_present = []  # 正常组样本量
+numbers_when_present = []  # 正常组样本量
 default_numbers_when_present = []  # 正常组违约样本量
 
 for col in missing_columns:
     temp_df = application_train[[col, 'TARGET']]
     
     default_rate = temp_df.loc[temp_df[col].notna(), 'TARGET'].mean()
-    missing_number = len(temp_df[temp_df[col].notna()])
+    number = len(temp_df[temp_df[col].notna()])
     default_number = temp_df.loc[temp_df[col].notna(), 'TARGET'].sum()
     
     default_rate_when_present.append(default_rate)
-    missing_numbers_when_present.append(missing_number)
+    numbers_when_present.append(number)
     default_numbers_when_present.append(default_number)
 
-del col, temp_df, default_rate, default_number, missing_number 
+del col, temp_df, default_rate, number, default_number
 
+# 汇总各项指标，输出汇总表
 missing_impact_summary = pd.DataFrame(
     {'missing_cols': missing_columns,
      'missing_rate': missing_summary['missing_rate'],
      
      'default_rate_when_missing': default_rate_when_missing,
-     'missing_numbers_when_missing': missing_numbers_when_missing,
+     'numbers_when_missing': numbers_when_missing,
      'default_numbers_when_missing': default_numbers_when_missing,
      
      'default_rate_when_present': default_rate_when_present,
-     'missing_numbers_when_present': missing_numbers_when_present,
+     'numbers_when_present': numbers_when_present,
      'default_numbers_when_present': default_numbers_when_present,
      
      'default_rate_diff': [default_rate_when_missing[i] -
@@ -396,53 +437,45 @@ missing_impact_summary = pd.DataFrame(
                            for i in range(len(default_rate_when_missing))]}
 )
 
-del default_rate_when_missing, missing_numbers_when_missing, default_numbers_when_missing,\
-    default_rate_when_present, missing_numbers_when_present, default_numbers_when_present
+del default_rate_when_missing, numbers_when_missing, default_numbers_when_missing
+del default_rate_when_present, numbers_when_present, default_numbers_when_present
 
 temp_list = ['missing_rate',
              'default_rate_when_missing',
              'default_rate_when_present',
              'default_rate_diff']
-missing_impact_summary[temp_list] = missing_impact_summary[temp_list].map(lambda x: f"{x:.2%}")
+missing_impact_summary[temp_list] = missing_impact_summary[temp_list].map(lambda x: f"{x:.5%}")
 # map对元素逐项变化，apply对series变化
-
-del temp_list
 
 for rate, group in missing_impact_summary.groupby('missing_rate'):
     if len(group) > 1:
-        temp_list = group['missing_cols']
+        temp_list_ = group['missing_cols']
         temp_s = group['default_rate_when_missing']
         if temp_s.max() > temp_s.min():
             print(f"{temp_list}的坏样本率不同")
 
-del temp_list, temp_s, group, rate
+del temp_list_, temp_s, group, rate
 
 "相同缺失率的字段，坏样本率都相同"
 
-del missing_columns, missing_summary
+# 更新到 cols_eda 中
+# cols_eda = pd.merge(
+#     cols_eda,
+#     missing_impact_summary[temp_list + ['missing_cols']],
+#     left_on='Row',
+#     right_on='missing_cols',
+#     how='left'
+# )
+    
+# del cols_eda['missing_cols']
+del temp_list
+
+# 初步输出 cols_eda
+# cols_eda.to_csv(DATA_PATH / 'interim' / 'cols_eda.csv')
 
 # 进一步分析缺失状态与 TARGET 的关系
 # 检验缺失组的违约率与非缺失组的违约率差异是否显著，设显著性水平为0.05
 # 两样本比例之差的假设检验
-
-def run_ztest_row(row):
-    col_default_n_missing = 'default_numbers_when_missing'
-    col_n_missing = 'missing_numbers_when_missing'
-    col_default_n_present = 'default_numbers_when_present'
-    col_n_present = 'missing_numbers_when_present'
-    
-    n_default_miss = row[col_default_n_missing]
-    n_default_pres = row[col_default_n_present]
-    
-    n_miss = row[col_n_missing]
-    n_pres = row[col_n_present]
-    
-    stat, pval = proportions_ztest(
-        count=[n_default_miss, n_default_pres],
-        nobs=[n_miss, n_pres],
-        alternative='two-sided')
-    
-    return pd.Series({'z_stat': stat, 'p_value': pval})
 
 missing_impact_summary[['z_stat', 'p_value']] = missing_impact_summary.apply(run_ztest_row, axis=1)
 
@@ -520,6 +553,8 @@ print(application_train['TARGET'].mean())
 
 '''
 
+cols_eda['is_delete'] = np.nan
+
 "筛选 int 类型的字段：包含0/1分类变量，离散数值变量"
 discrete_values_columns = application_train.select_dtypes(include='int').columns
 
@@ -528,10 +563,6 @@ for col in discrete_values_columns:
     discrete_values_frequency[col] = application_train[col].value_counts()
 
 del col
-
-# 新建处理汇总表
-discrete_values_summary = pd.DataFrame({'columns': discrete_values_columns,
-                                        'process': 'keep'})
 
 # DAYS_EMPLOYED 存在异常编码 55374
 
@@ -547,9 +578,7 @@ discrete_values_summary = pd.DataFrame({'columns': discrete_values_columns,
 # 1	25
 
 # FLAG_MOBIL 删除，几乎0方差
-discrete_values_summary.loc[
-    discrete_values_summary['columns'] == 'FLAG_MOBIL',
-    'process'] = 'delete'
+# cols_eda.loc[cols_eda['Row'] == 'FLAG_MOBIL', 'is_delete'] = 'delete'
 
 # 重点检查 FLAG_DOCUMENT_ 的取值情况（0/1）
 FLAG_frequency = pd.DataFrame({
@@ -587,11 +616,20 @@ FLAG_frequency = pd.DataFrame({
 # 1%–10%：DOCUMENT_5、6、8、16，保留
 # 大于 10%：DOCUMENT_3，保留
 
-discrete_values_summary.loc[
-    discrete_values_summary['columns'].isin([
-        f"FLAG_DOCUMENT_{i}"
-        for i in [2, 4, 10, 12, 7, 17, 19, 20, 21]
-    ]), 'process'] = 'delete'
+# cols_eda.loc[cols_eda['Row'].isin(
+#     [f"FLAG_DOCUMENT_{i}"
+#     for i in [2, 4, 10, 12, 7, 17, 19, 20, 21]]),
+#     'is_delete'] = 'delete'
+
+# cols_eda.loc[cols_eda['Row'].isin(
+#     [f"FLAG_DOCUMENT_{i}"
+#     for i in [9, 11, 13, 14, 15, 18]]),
+#     'is_delete'] = 'consider'
+
+# cols_eda.loc[cols_eda['Row'].isin(
+#     [f"FLAG_DOCUMENT_{i}"
+#     for i in [5, 6, 8, 16, 3]]),
+#     'is_delete'] = 'keep'
 
 # 对FLAG_DOCUMENT_3、6、8稳定的类别变量进一步分析不同类别违约率大小
 for col in ['FLAG_DOCUMENT_3', 'FLAG_DOCUMENT_6', 'FLAG_DOCUMENT_8']:
@@ -635,6 +673,18 @@ del col, default_rate_1, default_rate_0
 
 # FLAG_EMAIL取值为1时，违约率：7.88%
 # FLAG_EMAIL取值为0时，违约率：8.08%
+
+# 结果保存到 cols_eda
+# cols_eda.loc[cols_eda['Row'].isin(
+#     ['FLAG_EMP_PHONE',
+#      'FLAG_WORK_PHONE',
+#      'FLAG_CONT_MOBILE',
+#      'FLAG_PHONE',
+#      'FLAG_EMAIL']), 'is_delete'] = 'keep'
+
+# 输出更新后的cols_eda
+cols_eda.to_csv(DATA_PATH / 'interim' / 'cols_eda.csv', index=False)
+
 
 # 以上是对0/1编码后的分类变量的分析
 # 下面是对离散数值变量进行分析
@@ -715,6 +765,8 @@ DAYS_BIRTH_summary = bins_stats(bins=bins_birth,
 
 # 各组的样本量充足，违约率和年龄是单调递减的关系
 
+cols_eda.loc[cols_eda['Row'] == 'DAYS_BIRTH', 'is_delete'] = 'keep'
+
 del bins_birth, labels_birth
 
 # DAYS_EMPLOYED 将特殊编码365243单独一个箱子，采用业务含义分箱，
@@ -738,6 +790,8 @@ DAYS_EMPLOYED_summary = bins_stats(bins_employed,
 
 # 各组的样本量充足，可以看出随着工作年限增长，违约率是下降的，但是不是一个严格的线性关系
 
+cols_eda.loc[cols_eda['Row'] == 'DAYS_EMPLOYED', 'is_delete'] = 'keep'
+
 del bins_employed, labels_employed
 
 # 最后分析 DAYS_ID_PUBLISH
@@ -751,6 +805,8 @@ DAYS_ID_PUBLISH_summary = bins_stats(bins=bins_publish,
                                      labels=label_publish,
                                      column='DAYS_ID_PUBLISH',
                                      df=DAYS_ID_PUBLISH_summary)
+
+cols_eda.loc[cols_eda['Row'] == 'DAYS_ID_PUBLISH', 'is_delete'] = 'keep'
 
 del bins_publish, label_publish
 
@@ -812,6 +868,8 @@ CNT_CHILDREN_summary = bins_stats(bins_children,
 
 # 各组样本量充足，可以看出，违约率随孩子数量增长而增长
 
+cols_eda.loc[cols_eda['Row'] == 'CNT_CHILDREN', 'is_delete'] = 'keep'
+
 # 分析 CNT_FAM_MEMBERS 字段
 # CNT_FAM_MEMBERS	count
 # 1	67847
@@ -858,8 +916,11 @@ CNT_FAM_MEMBERS_summary = bins_stats(bins_fam,
 # 3	4人	8.65%	24697	2136
 # 4	5人及以上	9.91%	4007	397
 
+cols_eda.loc[cols_eda['Row'] == 'CNT_FAM_MEMBERS', 'is_delete'] = 'keep'
+
 del discrete_values_columns, discrete_values_frequency
 
+cols_eda.to_csv(DATA_PATH / 'interim' / 'cols_eda.csv', index=False)
 
 "筛选 float 类型的字段，即连续型数值变量"
 continuous_values_columns = application_train.select_dtypes(include='float').columns
@@ -1012,13 +1073,118 @@ ext_score_cols = ['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']
 # 7	0.0021462646864665006	EXT_SOURCE_2
 # 6	0.5638107254699832	EXT_SOURCE_1
 
+# 描述性统计
+application_train['EXT_SOURCE_1'].describe()
+# count    134133.000000
+# mean          0.502130
+# std           0.211062
+# min           0.014568
+# 25%           0.334007
+# 50%           0.505998
+# 75%           0.675053
+# max           0.962693
+# Name: EXT_SOURCE_1, dtype: float64
 
+# 分布比较对称
+sns.histplot(
+    data=application_train,
+    x='EXT_SOURCE_1',
+    )
+
+application_train['EXT_SOURCE_2'].describe()
+# count    3.068510e+05
+# mean     5.143927e-01
+# std      1.910602e-01
+# min      8.173617e-08
+# 25%      3.924574e-01
+# 50%      5.659614e-01
+# 75%      6.636171e-01
+# max      8.549997e-01
+# Name: EXT_SOURCE_2, dtype: float64
+
+sns.histplot(
+    data=application_train,
+    x='EXT_SOURCE_2',
+    )
+
+application_train['EXT_SOURCE_3'].describe()
+# count    246546.000000
+# mean          0.510853
+# std           0.194844
+# min           0.000527
+# 25%           0.370650
+# 50%           0.535276
+# 75%           0.669057
+# max           0.896010
+# Name: EXT_SOURCE_3, dtype: float64
+
+sns.histplot(
+    data=application_train,
+    x='EXT_SOURCE_3',
+    )
+
+# 分箱，观察与TARGET的关系
+EXT_SOURCE_bins = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+EXT_SOURCE_labels = ['0-0.2', '0.2-0.4', '0.4-0.6', '0.6-0.8', '0.8-1.0']
+
+EXT_SOURCE_1_summary = pd.DataFrame({'bins': EXT_SOURCE_labels + ['特殊编码组']})
+EXT_SOURCE_1_summary = bins_stats(bins=EXT_SOURCE_bins,
+                                  labels=EXT_SOURCE_labels,
+                                  column='EXT_SOURCE_1',
+                                  df=EXT_SOURCE_1_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0-0.2	18.23%	11661	2126
+# 1	0.2-0.4	10.31%	34542	3562
+# 2	0.4-0.6	6.42%	39702	2550
+# 3	0.6-0.8	4.16%	36986	1540
+# 4	0.8-1.0	2.46%	11242	276
+# 5	特殊编码组	8.52%	173378	14771
+
+EXT_SOURCE_2_summary = pd.DataFrame({'bins': EXT_SOURCE_labels + ['特殊编码组']})
+EXT_SOURCE_2_summary = bins_stats(bins=EXT_SOURCE_bins,
+                                  labels=EXT_SOURCE_labels,
+                                  column='EXT_SOURCE_2',
+                                  df=EXT_SOURCE_2_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0-0.2	18.84%	27865	5251
+# 1	0.2-0.4	11.62%	51078	5933
+# 2	0.4-0.6	7.79%	98869	7706
+# 3	0.6-0.8	4.57%	128470	5873
+# 4	0.8-1.0	1.76%	569	10
+# 5	特殊编码组	7.88%	660	52
+
+EXT_SOURCE_3_summary = pd.DataFrame({'bins': EXT_SOURCE_labels + ['特殊编码组']})
+EXT_SOURCE_3_summary = bins_stats(bins=EXT_SOURCE_bins,
+                                  labels=EXT_SOURCE_labels,
+                                  column='EXT_SOURCE_3',
+                                  df=EXT_SOURCE_3_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0-0.2	20.94%	19514	4087
+# 1	0.2-0.4	11.78%	52072	6133
+# 2	0.4-0.6	6.52%	80777	5266
+# 3	0.6-0.8	4.00%	84924	3396
+# 4	0.8-1.0	2.87%	9259	266
+# 5	特殊编码组	9.31%	60965	5677
+
+# 评分越高，违约率越低，而且下降趋势非常明显
+
+application_train[['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']].corr()
+
+#               EXT_SOURCE_1  EXT_SOURCE_2  EXT_SOURCE_3
+# EXT_SOURCE_1      1.000000      0.213982      0.186846
+# EXT_SOURCE_2      0.213982      1.000000      0.109167
+# EXT_SOURCE_3      0.186846      0.109167      1.000000
+
+# 三者的相关性不强
 
 
 # 3.房产及居住变量
 # 由前面的分析可知，房产相关变量的缺失模式相同，进行相关性分析
-house_cols = cols_meaning.loc[
-    cols_meaning['Description'].str.startswith('Normalized information'),
+house_cols = cols_eda.loc[
+    cols_eda['Description'].str.startswith('Normalized information'),
     'Row'
 ].tolist()
 
@@ -1085,4 +1251,344 @@ result = temp_df[temp_df[0].between(0.8, 0.9, inclusive='left')]
 
 del house_cols, house_corr, temp_df, upper_mask, result
 
-# 4.
+# 4.社交圈变量
+
+# 描述性统计
+application_train['OBS_30_CNT_SOCIAL_CIRCLE'].describe()
+# count    306490.000000
+# mean          1.422245
+# std           2.400989
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           2.000000
+# max         348.000000
+# Name: OBS_30_CNT_SOCIAL_CIRCLE, dtype: float64
+
+application_train['DEF_30_CNT_SOCIAL_CIRCLE'].describe()
+# count    306490.000000
+# mean          0.143421
+# std           0.446698
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max          34.000000
+# Name: DEF_30_CNT_SOCIAL_CIRCLE, dtype: float64
+
+application_train['OBS_60_CNT_SOCIAL_CIRCLE'].describe()
+# count    306490.000000
+# mean          1.405292
+# std           2.379803
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           2.000000
+# max         344.000000
+# Name: OBS_60_CNT_SOCIAL_CIRCLE, dtype: float64
+
+application_train['DEF_60_CNT_SOCIAL_CIRCLE'].describe()
+# count    306490.000000
+# mean          0.100049
+# std           0.362291
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max          24.000000
+# Name: DEF_60_CNT_SOCIAL_CIRCLE, dtype: float64
+
+# 观察到的社交圈人数，合并长尾计数，观察与 TARGET 的关系
+OBS_social_bins = [0, 1, 2, 3, 4, 5, np.inf]
+OBS_social_labels = ['0人', '1人', '2人', '3人', '4人', '5人及以上']
+
+OBS_30_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
+    {'bins': OBS_social_labels + ['特殊编码组']})
+OBS_30_CNT_SOCIAL_CIRCLE_summary = bins_stats(
+    bins=OBS_social_bins,
+    labels=OBS_social_labels,
+    column='OBS_30_CNT_SOCIAL_CIRCLE',
+    df=OBS_30_CNT_SOCIAL_CIRCLE_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0人	7.90%	163910	12950
+# 1	1人	7.98%	48783	3895
+# 2	2人	8.25%	29808	2458
+# 3	3人	8.24%	20322	1675
+# 4	4人	8.82%	14143	1248
+# 5	5人及以上	8.68%	29524	2563
+# 6	特殊编码组	3.53%	1021	36
+
+OBS_60_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
+    {'bins': OBS_social_labels + ['特殊编码组']})
+OBS_60_CNT_SOCIAL_CIRCLE_summary = bins_stats(
+    bins=OBS_social_bins,
+    labels=OBS_social_labels,
+    column='OBS_60_CNT_SOCIAL_CIRCLE',
+    df=OBS_60_CNT_SOCIAL_CIRCLE_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0人	7.91%	164666	13021
+# 1	1人	7.97%	48870	3894
+# 2	2人	8.22%	29766	2448
+# 3	3人	8.26%	20215	1670
+# 4	4人	8.83%	13946	1232
+# 5	5人及以上	8.70%	29027	2524
+# 6	特殊编码组	3.53%	1021	36
+
+# OBS_30_CNT_SOCIAL_CIRCLE_summary 和 OBS_60_CNT_SOCIAL_CIRCLE_summary
+# 0人违约率约为7.9%，4人时约为8.8%，5人及以上略有下降，整体呈弱正相关但不严格单调
+
+# 违约人数分布更稀疏，将2人及以上合并后观察与 TARGET 的关系
+DEF_social_bins = [0, 1, 2, np.inf]
+DEF_social_labels = ['0人', '1人', '2人及以上']
+
+DEF_30_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
+    {'bins': DEF_social_labels + ['特殊编码组']})
+DEF_30_CNT_SOCIAL_CIRCLE_summary = bins_stats(
+    bins=DEF_social_bins,
+    labels=DEF_social_labels,
+    column='DEF_30_CNT_SOCIAL_CIRCLE',
+    df=DEF_30_CNT_SOCIAL_CIRCLE_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0人	7.78%	271324	21098
+# 1	1人	10.15%	28328	2874
+# 2	2人及以上	11.95%	6838	817
+# 3	特殊编码组	3.53%	1021	36
+
+DEF_60_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
+    {'bins': DEF_social_labels + ['特殊编码组']})
+DEF_60_CNT_SOCIAL_CIRCLE_summary = bins_stats(
+    bins=DEF_social_bins,
+    labels=DEF_social_labels,
+    column='DEF_60_CNT_SOCIAL_CIRCLE',
+    df=DEF_60_CNT_SOCIAL_CIRCLE_summary)
+
+# DEF_30_CNT_SOCIAL_CIRCLE_summary 和 DEF_60_CNT_SOCIAL_CIRCLE_summary
+# 违约人数越多，申请人自身违约率越高，存在较明显的正相关关系
+
+# 5.电话变化与征信查询次数
+
+# 分析 DAYS_LAST_PHONE_CHANGE，将距上次电话变更天数转换成年
+(-application_train['DAYS_LAST_PHONE_CHANGE'] / 365).describe()
+# count    307510.000000
+# mean          2.637969
+# std           2.265229
+# min          -0.000000
+# 25%           0.750685
+# 50%           2.073973
+# 75%           4.301370
+# max          11.758904
+# Name: DAYS_LAST_PHONE_CHANGE, dtype: float64
+
+DAYS_LAST_PHONE_CHANGE_bins = [0, 1, 2, 5, np.inf]
+DAYS_LAST_PHONE_CHANGE_labels = ['0~1年', '1~2年', '2~5年', '5年以上']
+DAYS_LAST_PHONE_CHANGE_summary = pd.DataFrame(
+    {'bins': DAYS_LAST_PHONE_CHANGE_labels + ['特殊编码组']})
+DAYS_LAST_PHONE_CHANGE_summary = bins_stats(
+    bins=DAYS_LAST_PHONE_CHANGE_bins,
+    labels=DAYS_LAST_PHONE_CHANGE_labels,
+    column='DAYS_LAST_PHONE_CHANGE',
+    df=DAYS_LAST_PHONE_CHANGE_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0~1年	9.58%	92451	8854
+# 1	1~2年	9.30%	57641	5363
+# 2	2~5年	7.27%	105929	7698
+# 3	5年以上	5.65%	51489	2910
+# 4	特殊编码组	0.00%	1	0
+
+# 距上次电话变更时间越久，违约率整体越低，关系较清晰
+
+# AMT_REQ_CREDIT_BUREAU 系列变量的相关系数矩阵
+AMT_REQ_CREDIT_BUREAU_columns = [
+    'AMT_REQ_CREDIT_BUREAU_HOUR',
+    'AMT_REQ_CREDIT_BUREAU_DAY',
+    'AMT_REQ_CREDIT_BUREAU_WEEK',
+    'AMT_REQ_CREDIT_BUREAU_MON',
+    'AMT_REQ_CREDIT_BUREAU_QRT',
+    'AMT_REQ_CREDIT_BUREAU_YEAR'
+]
+
+application_train['AMT_REQ_CREDIT_BUREAU_HOUR'].describe()
+# count    265992.000000
+# mean          0.006402
+# std           0.083849
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max           4.000000
+# Name: AMT_REQ_CREDIT_BUREAU_HOUR, dtype: float64
+
+application_train['AMT_REQ_CREDIT_BUREAU_DAY'].describe()
+# count    265992.000000
+# mean          0.007000
+# std           0.110757
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max           9.000000
+# Name: AMT_REQ_CREDIT_BUREAU_DAY, dtype: float64
+
+application_train['AMT_REQ_CREDIT_BUREAU_WEEK'].describe()
+# count    265992.000000
+# mean          0.034362
+# std           0.204685
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max           8.000000
+# Name: AMT_REQ_CREDIT_BUREAU_WEEK, dtype: float64
+
+application_train['AMT_REQ_CREDIT_BUREAU_MON'].describe()
+# count    265992.000000
+# mean          0.267395
+# std           0.916002
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max          27.000000
+# Name: AMT_REQ_CREDIT_BUREAU_MON, dtype: float64
+
+application_train['AMT_REQ_CREDIT_BUREAU_QRT'].describe()
+# count    265992.000000
+# mean          0.265474
+# std           0.794056
+# min           0.000000
+# 25%           0.000000
+# 50%           0.000000
+# 75%           0.000000
+# max         261.000000
+# Name: AMT_REQ_CREDIT_BUREAU_QRT, dtype: float64
+
+application_train['AMT_REQ_CREDIT_BUREAU_YEAR'].describe()
+# count    265992.000000
+# mean          1.899974
+# std           1.869295
+# min           0.000000
+# 25%           0.000000
+# 50%           1.000000
+# 75%           3.000000
+# max          25.000000
+# Name: AMT_REQ_CREDIT_BUREAU_YEAR, dtype: float64
+
+AMT_REQ_CREDIT_BUREAU_corr = application_train[
+    AMT_REQ_CREDIT_BUREAU_columns
+].corr().round(2)
+
+#                          HOUR   DAY  WEEK   MON   QRT  YEAR
+# HOUR                     1.00  0.23  0.00 -0.00 -0.00 -0.00
+# DAY                      0.23  1.00  0.22 -0.01 -0.00 -0.00
+# WEEK                     0.00  0.22  1.00 -0.01 -0.02  0.02
+# MON                     -0.00 -0.01 -0.01  1.00 -0.01 -0.00
+# QRT                     -0.00 -0.00 -0.02 -0.01  1.00  0.08
+# YEAR                    -0.00 -0.00  0.02 -0.00  0.08  1.00
+
+# 整体相关性较弱，HOUR 与 DAY、DAY 与 WEEK 的相关系数分别为0.23和0.22
+
+# 小时、天、周查询次数的非零样本较少，合并为0次和1次及以上
+AMT_REQ_CREDIT_BUREAU_short_bins = [0, 1, np.inf]
+AMT_REQ_CREDIT_BUREAU_short_labels = ['0次', '1次及以上']
+
+AMT_REQ_CREDIT_BUREAU_HOUR_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_short_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_HOUR_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_short_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_short_labels,
+    column='AMT_REQ_CREDIT_BUREAU_HOUR',
+    df=AMT_REQ_CREDIT_BUREAU_HOUR_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.72%	264366	20402
+# 1	1次及以上	8.06%	1626	131
+# 2	特殊编码组	10.34%	41519	4292
+
+AMT_REQ_CREDIT_BUREAU_DAY_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_short_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_DAY_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_short_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_short_labels,
+    column='AMT_REQ_CREDIT_BUREAU_DAY',
+    df=AMT_REQ_CREDIT_BUREAU_DAY_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.71%	264503	20392
+# 1	1次及以上	9.47%	1489	141
+# 2	特殊编码组	10.34%	41519	4292
+
+AMT_REQ_CREDIT_BUREAU_WEEK_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_short_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_WEEK_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_short_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_short_labels,
+    column='AMT_REQ_CREDIT_BUREAU_WEEK',
+    df=AMT_REQ_CREDIT_BUREAU_WEEK_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.72%	257456	19865
+# 1	1次及以上	7.83%	8536	668
+# 2	特殊编码组	10.34%	41519	4292
+
+# 月度、季度查询次数按0、1、2、3次及以上分箱
+AMT_REQ_CREDIT_BUREAU_period_bins = [0, 1, 2, 3, np.inf]
+AMT_REQ_CREDIT_BUREAU_period_labels = ['0次', '1次', '2次', '3次及以上']
+
+AMT_REQ_CREDIT_BUREAU_MON_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_period_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_MON_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_period_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_period_labels,
+    column='AMT_REQ_CREDIT_BUREAU_MON',
+    df=AMT_REQ_CREDIT_BUREAU_MON_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.79%	222233	17315
+# 1	1次	7.72%	33147	2560
+# 2	2次	7.04%	5386	379
+# 3	3次及以上	5.34%	5226	279
+# 4	特殊编码组	10.34%	41519	4292
+
+AMT_REQ_CREDIT_BUREAU_QRT_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_period_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_QRT_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_period_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_period_labels,
+    column='AMT_REQ_CREDIT_BUREAU_QRT',
+    df=AMT_REQ_CREDIT_BUREAU_QRT_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.85%	215417	16905
+# 1	1次	6.58%	33862	2227
+# 2	2次	8.35%	14412	1203
+# 3	3次及以上	8.60%	2301	198
+# 4	特殊编码组	10.34%	41519	4292
+
+# 年度查询次数保留0到4次，5次及以上合并长尾
+AMT_REQ_CREDIT_BUREAU_YEAR_bins = [0, 1, 2, 3, 4, 5, np.inf]
+AMT_REQ_CREDIT_BUREAU_YEAR_labels = [
+    '0次', '1次', '2次', '3次', '4次', '5次及以上'
+]
+AMT_REQ_CREDIT_BUREAU_YEAR_summary = pd.DataFrame(
+    {'bins': AMT_REQ_CREDIT_BUREAU_YEAR_labels + ['特殊编码组']})
+AMT_REQ_CREDIT_BUREAU_YEAR_summary = bins_stats(
+    bins=AMT_REQ_CREDIT_BUREAU_YEAR_bins,
+    labels=AMT_REQ_CREDIT_BUREAU_YEAR_labels,
+    column='AMT_REQ_CREDIT_BUREAU_YEAR',
+    df=AMT_REQ_CREDIT_BUREAU_YEAR_summary)
+
+# 	bins	default_rate	population	pop_default
+# 0	0次	7.13%	71801	5123
+# 1	1次	7.33%	63405	4650
+# 2	2次	8.10%	50192	4068
+# 3	3次	7.96%	33628	2676
+# 4	4次	8.26%	20714	1710
+# 5	5次及以上	8.78%	26252	2306
+# 6	特殊编码组	10.34%	41519	4292
+
+# HOUR、DAY、WEEK的非零组样本较少；MON、QRT违约率非单调，YEAR总体随查询次数增加而上升但并非严格单调
+
