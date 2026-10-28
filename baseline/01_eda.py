@@ -107,7 +107,6 @@ cols_missinig_report = pd.read_csv(DATA_PATH / 'interim' / 'missing_impact_summa
 cols_eda = pd.read_csv(DATA_PATH / 'interim' / 'cols_eda.csv')
 
 # %%
-
 # 两样本比例之差检验函数
 def run_ztest_row(row):
     col_default_n_missing = 'default_numbers_when_missing'
@@ -186,6 +185,15 @@ def get_5_qcut(column):
     
     return default_rate.map(lambda x: f"{x:.2%}")
 
+# 字段不同类别的违约率
+def diff_type_default_rate(column):
+    col_default_rate = {}
+    col_dtypes = application_train[column].value_counts().index
+    for i in col_dtypes:
+        default_rate = application_train.loc[
+            application_train[column] == i, 'TARGET'].mean()
+        col_default_rate[i] = f"{default_rate:.2%}"
+    return col_default_rate.items()
 
 # %%
 "一、数据概况与数据质量"
@@ -479,12 +487,12 @@ del temp_list
 
 missing_impact_summary[['z_stat', 'p_value']] = missing_impact_summary.apply(run_ztest_row, axis=1)
 
-# 	missing_cols	missing_rate
-# 7	EXT_SOURCE_2	0.21%
-# 60	DAYS_LAST_PHONE_CHANGE	0.00%
-# 1	AMT_GOODS_PRICE	0.09%
-# 5	CNT_FAM_MEMBERS	0.00%
-# 0	AMT_ANNUITY	0.00%
+#     missing_cols            missing_rate
+# 7   EXT_SOURCE_2            0.21%
+# 60  DAYS_LAST_PHONE_CHANGE  0.00%
+# 1   AMT_GOODS_PRICE         0.09%
+# 5   CNT_FAM_MEMBERS         0.00%
+# 0   AMT_ANNUITY             0.00%
 
 ''' 这些变量的缺失率非常小，并且缺失组与正常组的违约率无显著差异，后续用中位数填充
     其余差异显著，考虑在特征工程阶段添加 _is_missing 列，相同缺失模式的只添加一列 '''
@@ -567,15 +575,15 @@ del col
 # DAYS_EMPLOYED 存在异常编码 55374
 
 # 存在取值极度稀有情况
-# FLAG_MOBIL	count
-# 1	307510
-# 0	1
-# FLAG_DOCUMENT_2	count
-# 0	307498
-# 1	13
-# FLAG_DOCUMENT_4	count
-# 0	307486
-# 1	25
+# FLAG_MOBIL       count
+# 1                307510
+# 0                1
+# FLAG_DOCUMENT_2  count
+# 0                307498
+# 1                13
+# FLAG_DOCUMENT_4  count
+# 0                307486
+# 1                25
 
 # FLAG_MOBIL 删除，几乎0方差
 # cols_eda.loc[cols_eda['Row'] == 'FLAG_MOBIL', 'is_delete'] = 'delete'
@@ -588,27 +596,27 @@ FLAG_frequency = pd.DataFrame({
 })
 
 # 统计每一列取1的频率
-# 	columns	frequency
-# 0	FLAG_DOCUMENT_2	0.0042%
-# 1	FLAG_DOCUMENT_3	71.0023%
-# 2	FLAG_DOCUMENT_4	0.0081%
-# 3	FLAG_DOCUMENT_5	1.5115%
-# 4	FLAG_DOCUMENT_6	8.8055%
-# 5	FLAG_DOCUMENT_7	0.0192%
-# 6	FLAG_DOCUMENT_8	8.1376%
-# 7	FLAG_DOCUMENT_9	0.3896%
-# 8	FLAG_DOCUMENT_10	0.0023%
-# 9	FLAG_DOCUMENT_11	0.3912%
-# 10	FLAG_DOCUMENT_12	0.0007%
-# 11	FLAG_DOCUMENT_13	0.3525%
-# 12	FLAG_DOCUMENT_14	0.2936%
-# 13	FLAG_DOCUMENT_15	0.1210%
-# 14	FLAG_DOCUMENT_16	0.9928%
-# 15	FLAG_DOCUMENT_17	0.0267%
-# 16	FLAG_DOCUMENT_18	0.8130%
-# 17	FLAG_DOCUMENT_19	0.0595%
-# 18	FLAG_DOCUMENT_20	0.0507%
-# 19	FLAG_DOCUMENT_21	0.0335%
+#     columns           frequency
+# 0   FLAG_DOCUMENT_2   0.0042%
+# 1   FLAG_DOCUMENT_3   71.0023%
+# 2   FLAG_DOCUMENT_4   0.0081%
+# 3   FLAG_DOCUMENT_5   1.5115%
+# 4   FLAG_DOCUMENT_6   8.8055%
+# 5   FLAG_DOCUMENT_7   0.0192%
+# 6   FLAG_DOCUMENT_8   8.1376%
+# 7   FLAG_DOCUMENT_9   0.3896%
+# 8   FLAG_DOCUMENT_10  0.0023%
+# 9   FLAG_DOCUMENT_11  0.3912%
+# 10  FLAG_DOCUMENT_12  0.0007%
+# 11  FLAG_DOCUMENT_13  0.3525%
+# 12  FLAG_DOCUMENT_14  0.2936%
+# 13  FLAG_DOCUMENT_15  0.1210%
+# 14  FLAG_DOCUMENT_16  0.9928%
+# 15  FLAG_DOCUMENT_17  0.0267%
+# 16  FLAG_DOCUMENT_18  0.8130%
+# 17  FLAG_DOCUMENT_19  0.0595%
+# 18  FLAG_DOCUMENT_20  0.0507%
+# 19  FLAG_DOCUMENT_21  0.0335%
 
 # 小于 0.01%：DOCUMENT_2、4、10、12，考虑删除
 # 0.01%–0.1%：DOCUMENT_7、17、19、20、21，考虑删除
@@ -756,12 +764,12 @@ DAYS_BIRTH_summary = bins_stats(bins=bins_birth,
                                 column='DAYS_BIRTH',
                                 df=DAYS_BIRTH_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	20~29岁	11.46%	45000	5155
-# 1	30~39岁	9.58%	82299	7885
-# 2	40~49岁	7.66%	76543	5860
-# 3	50岁~59岁	6.13%	68074	4173
-# 4	60岁以上	4.92%	35595	1752
+#    bins       default_rate  population  pop_default
+# 0  20~29岁    11.46%        45000       5155
+# 1  30~39岁    9.58%         82299       7885
+# 2  40~49岁    7.66%         76543       5860
+# 3  50岁~59岁  6.13%         68074       4173
+# 4  60岁以上   4.92%         35595       1752
 
 # 各组的样本量充足，违约率和年龄是单调递减的关系
 
@@ -780,13 +788,13 @@ DAYS_EMPLOYED_summary = bins_stats(bins_employed,
                                    'DAYS_EMPLOYED',
                                    DAYS_EMPLOYED_summary)
 
-# 	employed_bins	default_rate	population	pop_default
-# 0	少于1年	10.98%	27904	3065
-# 1	1~3年	11.07%	61489	6805
-# 2	3~5年	9.67%	46874	4535
-# 3	5~10年	7.37%	64890	4785
-# 4	10年以上	5.19%	50980	2645
-# 5	特殊编码组	5.40%	55374	2990
+#    employed_bins  default_rate  population  pop_default
+# 0  少于1年        10.98%        27904       3065
+# 1  1~3年          11.07%        61489       6805
+# 2  3~5年          9.67%         46874       4535
+# 3  5~10年         7.37%         64890       4785
+# 4  10年以上       5.19%         50980       2645
+# 5  特殊编码组     5.40%         55374       2990
 
 # 各组的样本量充足，可以看出随着工作年限增长，违约率是下降的，但是不是一个严格的线性关系
 
@@ -810,34 +818,34 @@ cols_eda.loc[cols_eda['Row'] == 'DAYS_ID_PUBLISH', 'is_delete'] = 'keep'
 
 del bins_publish, label_publish
 
-# 	bins_publish	default_rate	population	pop_default
-# 0	0~2年	10.17%	30735	3125
-# 1	2~5年	9.69%	51036	4946
-# 2	5~10年	8.46%	92710	7843
-# 3	10~15年	6.72%	130151	8751
-# 4	15年以上	5.56%	2879	160
+#    bins_publish  default_rate  population  pop_default
+# 0  0~2年         10.17%        30735       3125
+# 1  2~5年         9.69%         51036       4946
+# 2  5~10年        8.46%         92710       7843
+# 3  10~15年       6.72%         130151      8751
+# 4  15年以上      5.56%         2879        160
 
 # 各组样本量充足，可以看出越临近申请日更改id文件的申请人违约率越高
 
 del DAYS_BIRTH_summary, DAYS_EMPLOYED_summary, DAYS_ID_PUBLISH_summary
 
 # 分析 CNT_CHILDREN 这一字段
-# CNT_CHILDREN	count
-# 0	215371
-# 1	61119
-# 2	26749
-# 3	3717
-# 4	429
-# 5	84
-# 6	21
-# 7	7
-# 8	2
-# 9	2
-# 10	2
-# 11	1
-# 12	2
-# 14	3
-# 19	2
+# CNT_CHILDREN  count
+# 0             215371
+# 1             61119
+# 2             26749
+# 3             3717
+# 4             429
+# 5             84
+# 6             21
+# 7             7
+# 8             2
+# 9             2
+# 10            2
+# 11            1
+# 12            2
+# 14            3
+# 19            2
 
 application_train['CNT_CHILDREN'].describe()
 # count    307511.000000
@@ -860,35 +868,35 @@ CNT_CHILDREN_summary = bins_stats(bins_children,
                                   'CNT_CHILDREN',
                                   CNT_CHILDREN_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0个孩子	7.71%	215371	16609
-# 1	1个孩子	8.92%	61119	5454
-# 2	2个孩子	8.72%	26749	2333
-# 3	3个孩子及以上	10.04%	4272	429
+#    bins           default_rate  population  pop_default
+# 0  0个孩子        7.71%         215371      16609
+# 1  1个孩子        8.92%         61119       5454
+# 2  2个孩子        8.72%         26749       2333
+# 3  3个孩子及以上  10.04%        4272        429
 
 # 各组样本量充足，可以看出，违约率随孩子数量增长而增长
 
 cols_eda.loc[cols_eda['Row'] == 'CNT_CHILDREN', 'is_delete'] = 'keep'
 
 # 分析 CNT_FAM_MEMBERS 字段
-# CNT_FAM_MEMBERS	count
-# 1	67847
-# 2	158357
-# 3	52601
-# 4	24697
-# 5	3478
-# 6	408
-# 7	81
-# 8	20
-# 9	6
-# 10	3
-# 11	1
-# 12	2
-# 13	1
-# 14	2
-# 15	1
-# 16	2
-# 20	2
+# CNT_FAM_MEMBERS  count
+# 1                67847
+# 2                158357
+# 3                52601
+# 4                24697
+# 5                3478
+# 6                408
+# 7                81
+# 8                20
+# 9                6
+# 10               3
+# 11               1
+# 12               2
+# 13               1
+# 14               2
+# 15               1
+# 16               2
+# 20               2
 
 application_train['CNT_FAM_MEMBERS'].describe()
 # count    307509.0
@@ -909,12 +917,12 @@ CNT_FAM_MEMBERS_summary = bins_stats(bins_fam,
                                      'CNT_FAM_MEMBERS',
                                      CNT_FAM_MEMBERS_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	1人	8.36%	67847	5675
-# 1	2人	7.58%	158357	12009
-# 2	3人	8.76%	52601	4608
-# 3	4人	8.65%	24697	2136
-# 4	5人及以上	9.91%	4007	397
+#    bins       default_rate  population  pop_default
+# 0  1人        8.36%         67847       5675
+# 1  2人        7.58%         158357      12009
+# 2  3人        8.76%         52601       4608
+# 3  4人        8.65%         24697       2136
+# 4  5人及以上  9.91%         4007        397
 
 cols_eda.loc[cols_eda['Row'] == 'CNT_FAM_MEMBERS', 'is_delete'] = 'keep'
 
@@ -931,15 +939,15 @@ financial_basic_features_columns = continuous_values_columns[: 6]
 
 # 描述性统计
 financial_basic_features_stats = application_train[financial_basic_features_columns].describe()
-# 	AMT_INCOME_TOTAL	AMT_CREDIT	AMT_ANNUITY	AMT_GOODS_PRICE	REGION_POPULATION_RELATIVE	DAYS_REGISTRATION
-# count	307511.0	307511.0	307499.0	307233.0	307511.0	307511.0
-# mean	168797.9192969845	599025.9997057016	27108.573909183444	538396.2074288895	0.020868112057780035	-4986.120327538419
-# std	237123.14627885626	402490.77699585486	14493.737315118333	369446.46054005757	0.013831280122704704	3522.8863209630713
-# min	25650.0	45000.0	1615.5	40500.0	0.00029	-24672.0
-# 25%	112500.0	270000.0	16524.0	238500.0	0.010006	-7479.5
-# 50%	147150.0	513531.0	24903.0	450000.0	0.01885	-4504.0
-# 75%	202500.0	808650.0	34596.0	679500.0	0.028663	-2010.0
-# max	117000000.0	4050000.0	258025.5	4050000.0	0.072508	0.0
+#        AMT_INCOME_TOTAL    AMT_CREDIT          AMT_ANNUITY         AMT_GOODS_PRICE     REGION_POPULATION_RELATIVE  DAYS_REGISTRATION
+# count  307511.0            307511.0            307499.0            307233.0            307511.0                    307511.0
+# mean   168797.9192969845   599025.9997057016   27108.573909183444  538396.2074288895   0.020868112057780035        -4986.120327538419
+# std    237123.14627885626  402490.77699585486  14493.737315118333  369446.46054005757  0.013831280122704704        3522.8863209630713
+# min    25650.0             45000.0             1615.5              40500.0             0.00029                     -24672.0
+# 25%    112500.0            270000.0            16524.0             238500.0            0.010006                    -7479.5
+# 50%    147150.0            513531.0            24903.0             450000.0            0.01885                     -4504.0
+# 75%    202500.0            808650.0            34596.0             679500.0            0.028663                    -2010.0
+# max    117000000.0         4050000.0           258025.5            4050000.0           0.072508                    0.0
 
 # 绘制直方图
 sns.histplot(
@@ -1012,11 +1020,11 @@ AMT_corr = application_train[
     ['AMT_INCOME_TOTAL', 'AMT_CREDIT', 'AMT_ANNUITY', 'AMT_GOODS_PRICE']
     ].corr().round(2)
 
-# AMT_INCOME_TOTAL	AMT_CREDIT	AMT_ANNUITY	AMT_GOODS_PRICE
-# AMT_INCOME_TOTAL	1.0	0.16	0.19	0.16
-# AMT_CREDIT	0.16	1.0	0.77	0.99
-# AMT_ANNUITY	0.19	0.77	1.0	0.78
-# AMT_GOODS_PRICE	0.16	0.99	0.78	1.0
+#                   AMT_INCOME_TOTAL  AMT_CREDIT   AMT_ANNUITY      AMT_GOODS_PRICE
+# AMT_INCOME_TOTAL  1.0         0.16         0.19             0.16
+# AMT_CREDIT        0.16        1.0          0.77             0.99
+# AMT_ANNUITY       0.19        0.77         1.0              0.78
+# AMT_GOODS_PRICE   0.16        0.99         0.78             1.0
 
 # 可以发现 AMT_CREDIT 和 AMT_GOODS_PRICE 相关系数极高，存在重复信息
 # AMT_GOODS_PRICE 和 AMT_ANNUITY，AMT_CREDIT 和 AMT_ANNUITY 也有较强的线性相关关系
@@ -1054,12 +1062,12 @@ bins_stats(DAYS_REGISTRATION_bins,
            'DAYS_REGISTRATION',
            DAYS_REGISTRATION_summary)
 
-#      bins default_rate  population  pop_default
-# 0    0-2年        9.64%       32432         3127
-# 1    2-5年        8.80%       39133         3445
-# 2   5-10年        8.72%       54618         4762
-# 3  10-20年        8.31%      100662         8370
-# 4   20年以上        6.35%       80666         5121
+#    bins      default_rate  population  pop_default
+# 0  0-2年     9.64%         32432       3127
+# 1  2-5年     8.80%         39133       3445
+# 2  5-10年    8.72%         54618       4762
+# 3  10-20年   8.31%         100662      8370
+# 4  20年以上  6.35%         80666       5121
 
 # DAYS_REGISTRATION 呈现出比较清晰的违约率随登记年限增加而总体下降的趋势，而且各组样本量都比较充足
 del DAYS_REGISTRATION_bins, DAYS_REGISTRATION_labels, DAYS_REGISTRATION_summary
@@ -1068,10 +1076,10 @@ del financial_basic_features_columns
 
 # 2.分析外部信用评分变量
 ext_score_cols = ['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']
-# 	missing_rate	Row
-# 8	0.19825307062186392	EXT_SOURCE_3
-# 7	0.0021462646864665006	EXT_SOURCE_2
-# 6	0.5638107254699832	EXT_SOURCE_1
+#    missing_rate           Row
+# 8  0.19825307062186392    EXT_SOURCE_3
+# 7  0.0021462646864665006  EXT_SOURCE_2
+# 6  0.5638107254699832     EXT_SOURCE_1
 
 # 描述性统计
 application_train['EXT_SOURCE_1'].describe()
@@ -1133,13 +1141,13 @@ EXT_SOURCE_1_summary = bins_stats(bins=EXT_SOURCE_bins,
                                   column='EXT_SOURCE_1',
                                   df=EXT_SOURCE_1_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0-0.2	18.23%	11661	2126
-# 1	0.2-0.4	10.31%	34542	3562
-# 2	0.4-0.6	6.42%	39702	2550
-# 3	0.6-0.8	4.16%	36986	1540
-# 4	0.8-1.0	2.46%	11242	276
-# 5	特殊编码组	8.52%	173378	14771
+#    bins        default_rate  population  pop_default
+# 0  0-0.2       18.23%        11661       2126
+# 1  0.2-0.4     10.31%        34542       3562
+# 2  0.4-0.6     6.42%         39702       2550
+# 3  0.6-0.8     4.16%         36986       1540
+# 4  0.8-1.0     2.46%         11242       276
+# 5  特殊编码组  8.52%         173378      14771
 
 EXT_SOURCE_2_summary = pd.DataFrame({'bins': EXT_SOURCE_labels + ['特殊编码组']})
 EXT_SOURCE_2_summary = bins_stats(bins=EXT_SOURCE_bins,
@@ -1147,13 +1155,13 @@ EXT_SOURCE_2_summary = bins_stats(bins=EXT_SOURCE_bins,
                                   column='EXT_SOURCE_2',
                                   df=EXT_SOURCE_2_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0-0.2	18.84%	27865	5251
-# 1	0.2-0.4	11.62%	51078	5933
-# 2	0.4-0.6	7.79%	98869	7706
-# 3	0.6-0.8	4.57%	128470	5873
-# 4	0.8-1.0	1.76%	569	10
-# 5	特殊编码组	7.88%	660	52
+#    bins        default_rate  population  pop_default
+# 0  0-0.2       18.84%        27865       5251
+# 1  0.2-0.4     11.62%        51078       5933
+# 2  0.4-0.6     7.79%         98869       7706
+# 3  0.6-0.8     4.57%         128470      5873
+# 4  0.8-1.0     1.76%         569         10
+# 5  特殊编码组  7.88%         660         52
 
 EXT_SOURCE_3_summary = pd.DataFrame({'bins': EXT_SOURCE_labels + ['特殊编码组']})
 EXT_SOURCE_3_summary = bins_stats(bins=EXT_SOURCE_bins,
@@ -1161,13 +1169,13 @@ EXT_SOURCE_3_summary = bins_stats(bins=EXT_SOURCE_bins,
                                   column='EXT_SOURCE_3',
                                   df=EXT_SOURCE_3_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0-0.2	20.94%	19514	4087
-# 1	0.2-0.4	11.78%	52072	6133
-# 2	0.4-0.6	6.52%	80777	5266
-# 3	0.6-0.8	4.00%	84924	3396
-# 4	0.8-1.0	2.87%	9259	266
-# 5	特殊编码组	9.31%	60965	5677
+#    bins        default_rate  population  pop_default
+# 0  0-0.2       20.94%        19514       4087
+# 1  0.2-0.4     11.78%        52072       6133
+# 2  0.4-0.6     6.52%         80777       5266
+# 3  0.6-0.8     4.00%         84924       3396
+# 4  0.8-1.0     2.87%         9259        266
+# 5  特殊编码组  9.31%         60965       5677
 
 # 评分越高，违约率越低，而且下降趋势非常明显
 
@@ -1196,58 +1204,58 @@ house_corr = house_corr.where(upper_mask)
 temp_df = house_corr.stack().reset_index()
 result = temp_df[temp_df[0].between(0.9, 1)]
 
-# 	level_0	level_1	0
-# 9	APARTMENTS_AVG	LIVINGAPARTMENTS_AVG	0.94
-# 10	APARTMENTS_AVG	LIVINGAREA_AVG	0.91
-# 13	APARTMENTS_AVG	APARTMENTS_MODE	0.97
-# 23	APARTMENTS_AVG	LIVINGAPARTMENTS_MODE	0.93
-# 27	APARTMENTS_AVG	APARTMENTS_MEDI	1.0
-# 37	APARTMENTS_AVG	LIVINGAPARTMENTS_MEDI	0.94
-# 38	APARTMENTS_AVG	LIVINGAREA_MEDI	0.91
-# 55	BASEMENTAREA_AVG	BASEMENTAREA_MODE	0.97
-# 69	BASEMENTAREA_AVG	BASEMENTAREA_MEDI	0.99
-# 96	YEARS_BEGINEXPLUATATION_AVG	YEARS_BEGINEXPLUATATION_MODE	0.97
-# 110	YEARS_BEGINEXPLUATATION_AVG	YEARS_BEGINEXPLUATATION_MEDI	0.99
-# 136	YEARS_BUILD_AVG	YEARS_BUILD_MODE	0.99
+#      level_0                      level_1                       0
+# 9    APARTMENTS_AVG               LIVINGAPARTMENTS_AVG          0.94
+# 10   APARTMENTS_AVG               LIVINGAREA_AVG                0.91
+# 13   APARTMENTS_AVG               APARTMENTS_MODE               0.97
+# 23   APARTMENTS_AVG               LIVINGAPARTMENTS_MODE         0.93
+# 27   APARTMENTS_AVG               APARTMENTS_MEDI               1.0
+# 37   APARTMENTS_AVG               LIVINGAPARTMENTS_MEDI         0.94
+# 38   APARTMENTS_AVG               LIVINGAREA_MEDI               0.91
+# 55   BASEMENTAREA_AVG             BASEMENTAREA_MODE             0.97
+# 69   BASEMENTAREA_AVG             BASEMENTAREA_MEDI             0.99
+# 96   YEARS_BEGINEXPLUATATION_AVG  YEARS_BEGINEXPLUATATION_MODE  0.97
+# 110  YEARS_BEGINEXPLUATATION_AVG  YEARS_BEGINEXPLUATATION_MEDI  0.99
+# 136  YEARS_BUILD_AVG              YEARS_BUILD_MODE              0.99
 
 # 查看0.8到0.9
 result = temp_df[temp_df[0].between(0.8, 0.9, inclusive='left')]
-# 	level_0	level_1	0
-# 4	APARTMENTS_AVG	ELEVATORS_AVG	0.84
-# 18	APARTMENTS_AVG	ELEVATORS_MODE	0.82
-# 24	APARTMENTS_AVG	LIVINGAREA_MODE	0.89
-# 32	APARTMENTS_AVG	ELEVATORS_MEDI	0.84
-# 41	APARTMENTS_AVG	TOTALAREA_MODE	0.89
-# 204	ELEVATORS_AVG	LIVINGAPARTMENTS_AVG	0.81
-# 205	ELEVATORS_AVG	LIVINGAREA_AVG	0.87
-# 208	ELEVATORS_AVG	APARTMENTS_MODE	0.81
-# 218	ELEVATORS_AVG	LIVINGAPARTMENTS_MODE	0.8
-# 219	ELEVATORS_AVG	LIVINGAREA_MODE	0.84
-# 222	ELEVATORS_AVG	APARTMENTS_MEDI	0.83
-# 232	ELEVATORS_AVG	LIVINGAPARTMENTS_MEDI	0.81
-# 233	ELEVATORS_AVG	LIVINGAREA_MEDI	0.87
-# 236	ELEVATORS_AVG	TOTALAREA_MODE	0.84
-# 375	LIVINGAPARTMENTS_AVG	LIVINGAREA_AVG	0.88
-# 389	LIVINGAPARTMENTS_AVG	LIVINGAREA_MODE	0.85
-# 397	LIVINGAPARTMENTS_AVG	ELEVATORS_MEDI	0.81
-# 403	LIVINGAPARTMENTS_AVG	LIVINGAREA_MEDI	0.88
-# 406	LIVINGAPARTMENTS_AVG	TOTALAREA_MODE	0.85
-# 409	LIVINGAREA_AVG	APARTMENTS_MODE	0.89
-# 414	LIVINGAREA_AVG	ELEVATORS_MODE	0.85
-# 419	LIVINGAREA_AVG	LIVINGAPARTMENTS_MODE	0.87
-# 428	LIVINGAREA_AVG	ELEVATORS_MEDI	0.87
-# 433	LIVINGAREA_AVG	LIVINGAPARTMENTS_MEDI	0.88
-# 501	APARTMENTS_MODE	ELEVATORS_MODE	0.83
-# 515	APARTMENTS_MODE	ELEVATORS_MEDI	0.81
-# 521	APARTMENTS_MODE	LIVINGAREA_MEDI	0.89
-# 524	APARTMENTS_MODE	TOTALAREA_MODE	0.86
-# 631	ELEVATORS_MODE	LIVINGAPARTMENTS_MODE	0.81
-# 632	ELEVATORS_MODE	LIVINGAREA_MODE	0.86
-# 635	ELEVATORS_MODE	APARTMENTS_MEDI	0.83
-# 645	ELEVATORS_MODE	LIVINGAPARTMENTS_MEDI	0.8
-# 646	ELEVATORS_MODE	LIVINGAREA_MEDI	0.86
+#      level_0               level_1                0
+# 4    APARTMENTS_AVG        ELEVATORS_AVG          0.84
+# 18   APARTMENTS_AVG        ELEVATORS_MODE         0.82
+# 24   APARTMENTS_AVG        LIVINGAREA_MODE        0.89
+# 32   APARTMENTS_AVG        ELEVATORS_MEDI         0.84
+# 41   APARTMENTS_AVG        TOTALAREA_MODE         0.89
+# 204  ELEVATORS_AVG         LIVINGAPARTMENTS_AVG   0.81
+# 205  ELEVATORS_AVG         LIVINGAREA_AVG         0.87
+# 208  ELEVATORS_AVG         APARTMENTS_MODE        0.81
+# 218  ELEVATORS_AVG         LIVINGAPARTMENTS_MODE  0.8
+# 219  ELEVATORS_AVG         LIVINGAREA_MODE        0.84
+# 222  ELEVATORS_AVG         APARTMENTS_MEDI        0.83
+# 232  ELEVATORS_AVG         LIVINGAPARTMENTS_MEDI  0.81
+# 233  ELEVATORS_AVG         LIVINGAREA_MEDI        0.87
+# 236  ELEVATORS_AVG         TOTALAREA_MODE         0.84
+# 375  LIVINGAPARTMENTS_AVG  LIVINGAREA_AVG         0.88
+# 389  LIVINGAPARTMENTS_AVG  LIVINGAREA_MODE        0.85
+# 397  LIVINGAPARTMENTS_AVG  ELEVATORS_MEDI         0.81
+# 403  LIVINGAPARTMENTS_AVG  LIVINGAREA_MEDI        0.88
+# 406  LIVINGAPARTMENTS_AVG  TOTALAREA_MODE         0.85
+# 409  LIVINGAREA_AVG        APARTMENTS_MODE        0.89
+# 414  LIVINGAREA_AVG        ELEVATORS_MODE         0.85
+# 419  LIVINGAREA_AVG        LIVINGAPARTMENTS_MODE  0.87
+# 428  LIVINGAREA_AVG        ELEVATORS_MEDI         0.87
+# 433  LIVINGAREA_AVG        LIVINGAPARTMENTS_MEDI  0.88
+# 501  APARTMENTS_MODE       ELEVATORS_MODE         0.83
+# 515  APARTMENTS_MODE       ELEVATORS_MEDI         0.81
+# 521  APARTMENTS_MODE       LIVINGAREA_MEDI        0.89
+# 524  APARTMENTS_MODE       TOTALAREA_MODE         0.86
+# 631  ELEVATORS_MODE        LIVINGAPARTMENTS_MODE  0.81
+# 632  ELEVATORS_MODE        LIVINGAREA_MODE        0.86
+# 635  ELEVATORS_MODE        APARTMENTS_MEDI        0.83
+# 645  ELEVATORS_MODE        LIVINGAPARTMENTS_MEDI  0.8
+# 646  ELEVATORS_MODE        LIVINGAREA_MEDI        0.86
 
-# 说明房产及居住变量之间存在很强的相关性，APARTMENTS_AVG	APARTMENTS_MEDI的相关系数达到了1
+# 说明房产及居住变量之间存在很强的相关性，APARTMENTS_AVG APARTMENTS_MEDI的相关系数达到了1
 
 del house_cols, house_corr, temp_df, upper_mask, result
 
@@ -1265,6 +1273,14 @@ application_train['OBS_30_CNT_SOCIAL_CIRCLE'].describe()
 # max         348.000000
 # Name: OBS_30_CNT_SOCIAL_CIRCLE, dtype: float64
 
+# 存在一个非常大的离群点384，去除之后绘图
+sns.histplot(
+    data=application_train[
+        application_train['OBS_30_CNT_SOCIAL_CIRCLE'] != 348],
+    x='OBS_30_CNT_SOCIAL_CIRCLE'
+)
+# 明显的强烈右偏
+
 application_train['DEF_30_CNT_SOCIAL_CIRCLE'].describe()
 # count    306490.000000
 # mean          0.143421
@@ -1275,6 +1291,12 @@ application_train['DEF_30_CNT_SOCIAL_CIRCLE'].describe()
 # 75%           0.000000
 # max          34.000000
 # Name: DEF_30_CNT_SOCIAL_CIRCLE, dtype: float64
+
+sns.histplot(
+    data=application_train,
+    x='DEF_30_CNT_SOCIAL_CIRCLE'
+)
+# 右偏
 
 application_train['OBS_60_CNT_SOCIAL_CIRCLE'].describe()
 # count    306490.000000
@@ -1298,6 +1320,11 @@ application_train['DEF_60_CNT_SOCIAL_CIRCLE'].describe()
 # max          24.000000
 # Name: DEF_60_CNT_SOCIAL_CIRCLE, dtype: float64
 
+sns.histplot(
+    data=application_train,
+    x='DEF_60_CNT_SOCIAL_CIRCLE'
+)
+
 # 观察到的社交圈人数，合并长尾计数，观察与 TARGET 的关系
 OBS_social_bins = [0, 1, 2, 3, 4, 5, np.inf]
 OBS_social_labels = ['0人', '1人', '2人', '3人', '4人', '5人及以上']
@@ -1310,14 +1337,17 @@ OBS_30_CNT_SOCIAL_CIRCLE_summary = bins_stats(
     column='OBS_30_CNT_SOCIAL_CIRCLE',
     df=OBS_30_CNT_SOCIAL_CIRCLE_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0人	7.90%	163910	12950
-# 1	1人	7.98%	48783	3895
-# 2	2人	8.25%	29808	2458
-# 3	3人	8.24%	20322	1675
-# 4	4人	8.82%	14143	1248
-# 5	5人及以上	8.68%	29524	2563
-# 6	特殊编码组	3.53%	1021	36
+#    bins        default_rate  population  pop_default
+# 0  0人         7.90%         163910      12950
+# 1  1人         7.98%         48783       3895
+# 2  2人         8.25%         29808       2458
+# 3  3人         8.24%         20322       1675
+# 4  4人         8.82%         14143       1248
+# 5  5人及以上   8.68%         29524       2563
+# 6  特殊编码组  3.53%         1021        36
+
+# 特殊编码组的违约率显著小于一般的违约率大小，是一个很强的风险信号
+# 针对这种不严格单调的情况，后续评分卡模型的特征工程可以进一步进行箱子的合并
 
 OBS_60_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
     {'bins': OBS_social_labels + ['特殊编码组']})
@@ -1327,17 +1357,20 @@ OBS_60_CNT_SOCIAL_CIRCLE_summary = bins_stats(
     column='OBS_60_CNT_SOCIAL_CIRCLE',
     df=OBS_60_CNT_SOCIAL_CIRCLE_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0人	7.91%	164666	13021
-# 1	1人	7.97%	48870	3894
-# 2	2人	8.22%	29766	2448
-# 3	3人	8.26%	20215	1670
-# 4	4人	8.83%	13946	1232
-# 5	5人及以上	8.70%	29027	2524
-# 6	特殊编码组	3.53%	1021	36
+#    bins        default_rate  population  pop_default
+# 0  0人         7.91%         164666      13021
+# 1  1人         7.97%         48870       3894
+# 2  2人         8.22%         29766       2448
+# 3  3人         8.26%         20215       1670
+# 4  4人         8.83%         13946       1232
+# 5  5人及以上   8.70%         29027       2524
+# 6  特殊编码组  3.53%         1021        36
 
 # OBS_30_CNT_SOCIAL_CIRCLE_summary 和 OBS_60_CNT_SOCIAL_CIRCLE_summary
 # 0人违约率约为7.9%，4人时约为8.8%，5人及以上略有下降，整体呈弱正相关但不严格单调
+# 针对这种不严格单调的情况，后续评分卡模型的特征工程可以进一步进行箱子的合并
+
+# 特殊编码组的违约率显著小于一般的违约率大小，是一个很强的风险信号
 
 # 违约人数分布更稀疏，将2人及以上合并后观察与 TARGET 的关系
 DEF_social_bins = [0, 1, 2, np.inf]
@@ -1351,11 +1384,13 @@ DEF_30_CNT_SOCIAL_CIRCLE_summary = bins_stats(
     column='DEF_30_CNT_SOCIAL_CIRCLE',
     df=DEF_30_CNT_SOCIAL_CIRCLE_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0人	7.78%	271324	21098
-# 1	1人	10.15%	28328	2874
-# 2	2人及以上	11.95%	6838	817
-# 3	特殊编码组	3.53%	1021	36
+#    bins        default_rate  population  pop_default
+# 0  0人         7.78%         271324      21098
+# 1  1人         10.15%        28328       2874
+# 2  2人及以上    11.95%        6838        817
+# 3  特殊编码组   3.53%         1021        36
+
+# 特殊编码组的违约率显著小于一般的违约率大小，是一个很强的风险信号
 
 DEF_60_CNT_SOCIAL_CIRCLE_summary = pd.DataFrame(
     {'bins': DEF_social_labels + ['特殊编码组']})
@@ -1364,6 +1399,14 @@ DEF_60_CNT_SOCIAL_CIRCLE_summary = bins_stats(
     labels=DEF_social_labels,
     column='DEF_60_CNT_SOCIAL_CIRCLE',
     df=DEF_60_CNT_SOCIAL_CIRCLE_summary)
+
+#    bins        default_rate  population  pop_default
+# 0  0人         7.83%         280721      21994
+# 1  1人         10.52%        21841       2297
+# 2  2人及以上    12.68%        3928        498
+# 3  特殊编码组   3.53%         1021        36
+
+# 特殊编码组的违约率显著小于一般的违约率大小，是一个很强的风险信号
 
 # DEF_30_CNT_SOCIAL_CIRCLE_summary 和 DEF_60_CNT_SOCIAL_CIRCLE_summary
 # 违约人数越多，申请人自身违约率越高，存在较明显的正相关关系
@@ -1392,12 +1435,12 @@ DAYS_LAST_PHONE_CHANGE_summary = bins_stats(
     column='DAYS_LAST_PHONE_CHANGE',
     df=DAYS_LAST_PHONE_CHANGE_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0~1年	9.58%	92451	8854
-# 1	1~2年	9.30%	57641	5363
-# 2	2~5年	7.27%	105929	7698
-# 3	5年以上	5.65%	51489	2910
-# 4	特殊编码组	0.00%	1	0
+#    bins        default_rate  population  pop_default
+# 0  0~1年       9.58%         92451       8854
+# 1  1~2年       9.30%         57641       5363
+# 2  2~5年       7.27%         105929      7698
+# 3  5年以上     5.65%         51489       2910
+# 4  特殊编码组  0.00%         1           0
 
 # 距上次电话变更时间越久，违约率整体越低，关系较清晰
 
@@ -1410,6 +1453,20 @@ AMT_REQ_CREDIT_BUREAU_columns = [
     'AMT_REQ_CREDIT_BUREAU_QRT',
     'AMT_REQ_CREDIT_BUREAU_YEAR'
 ]
+
+AMT_REQ_CREDIT_BUREAU_corr = application_train[
+    AMT_REQ_CREDIT_BUREAU_columns
+].corr().round(2)
+
+#                          HOUR   DAY  WEEK   MON   QRT  YEAR
+# HOUR                     1.00  0.23  0.00 -0.00 -0.00 -0.00
+# DAY                      0.23  1.00  0.22 -0.01 -0.00 -0.00
+# WEEK                     0.00  0.22  1.00 -0.01 -0.02  0.02
+# MON                     -0.00 -0.01 -0.01  1.00 -0.01 -0.00
+# QRT                     -0.00 -0.00 -0.02 -0.01  1.00  0.08
+# YEAR                    -0.00 -0.00  0.02 -0.00  0.08  1.00
+
+# 整体相关性较弱，HOUR 与 DAY、DAY 与 WEEK 的相关系数分别为0.23和0.22
 
 application_train['AMT_REQ_CREDIT_BUREAU_HOUR'].describe()
 # count    265992.000000
@@ -1477,20 +1534,6 @@ application_train['AMT_REQ_CREDIT_BUREAU_YEAR'].describe()
 # max          25.000000
 # Name: AMT_REQ_CREDIT_BUREAU_YEAR, dtype: float64
 
-AMT_REQ_CREDIT_BUREAU_corr = application_train[
-    AMT_REQ_CREDIT_BUREAU_columns
-].corr().round(2)
-
-#                          HOUR   DAY  WEEK   MON   QRT  YEAR
-# HOUR                     1.00  0.23  0.00 -0.00 -0.00 -0.00
-# DAY                      0.23  1.00  0.22 -0.01 -0.00 -0.00
-# WEEK                     0.00  0.22  1.00 -0.01 -0.02  0.02
-# MON                     -0.00 -0.01 -0.01  1.00 -0.01 -0.00
-# QRT                     -0.00 -0.00 -0.02 -0.01  1.00  0.08
-# YEAR                    -0.00 -0.00  0.02 -0.00  0.08  1.00
-
-# 整体相关性较弱，HOUR 与 DAY、DAY 与 WEEK 的相关系数分别为0.23和0.22
-
 # 小时、天、周查询次数的非零样本较少，合并为0次和1次及以上
 AMT_REQ_CREDIT_BUREAU_short_bins = [0, 1, np.inf]
 AMT_REQ_CREDIT_BUREAU_short_labels = ['0次', '1次及以上']
@@ -1503,10 +1546,10 @@ AMT_REQ_CREDIT_BUREAU_HOUR_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_HOUR',
     df=AMT_REQ_CREDIT_BUREAU_HOUR_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.72%	264366	20402
-# 1	1次及以上	8.06%	1626	131
-# 2	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.72%         264366      20402
+# 1  1次及以上    8.06%         1626        131
+# 2  特殊编码组   10.34%        41519       4292
 
 AMT_REQ_CREDIT_BUREAU_DAY_summary = pd.DataFrame(
     {'bins': AMT_REQ_CREDIT_BUREAU_short_labels + ['特殊编码组']})
@@ -1516,10 +1559,10 @@ AMT_REQ_CREDIT_BUREAU_DAY_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_DAY',
     df=AMT_REQ_CREDIT_BUREAU_DAY_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.71%	264503	20392
-# 1	1次及以上	9.47%	1489	141
-# 2	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.71%         264503      20392
+# 1  1次及以上    9.47%         1489        141
+# 2  特殊编码组   10.34%        41519       4292
 
 AMT_REQ_CREDIT_BUREAU_WEEK_summary = pd.DataFrame(
     {'bins': AMT_REQ_CREDIT_BUREAU_short_labels + ['特殊编码组']})
@@ -1529,10 +1572,10 @@ AMT_REQ_CREDIT_BUREAU_WEEK_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_WEEK',
     df=AMT_REQ_CREDIT_BUREAU_WEEK_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.72%	257456	19865
-# 1	1次及以上	7.83%	8536	668
-# 2	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.72%         257456      19865
+# 1  1次及以上    7.83%         8536        668
+# 2  特殊编码组   10.34%        41519       4292
 
 # 月度、季度查询次数按0、1、2、3次及以上分箱
 AMT_REQ_CREDIT_BUREAU_period_bins = [0, 1, 2, 3, np.inf]
@@ -1546,12 +1589,12 @@ AMT_REQ_CREDIT_BUREAU_MON_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_MON',
     df=AMT_REQ_CREDIT_BUREAU_MON_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.79%	222233	17315
-# 1	1次	7.72%	33147	2560
-# 2	2次	7.04%	5386	379
-# 3	3次及以上	5.34%	5226	279
-# 4	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.79%         222233      17315
+# 1  1次         7.72%         33147       2560
+# 2  2次         7.04%         5386        379
+# 3  3次及以上    5.34%         5226        279
+# 4  特殊编码组   10.34%        41519       4292
 
 AMT_REQ_CREDIT_BUREAU_QRT_summary = pd.DataFrame(
     {'bins': AMT_REQ_CREDIT_BUREAU_period_labels + ['特殊编码组']})
@@ -1561,12 +1604,12 @@ AMT_REQ_CREDIT_BUREAU_QRT_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_QRT',
     df=AMT_REQ_CREDIT_BUREAU_QRT_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.85%	215417	16905
-# 1	1次	6.58%	33862	2227
-# 2	2次	8.35%	14412	1203
-# 3	3次及以上	8.60%	2301	198
-# 4	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.85%         215417      16905
+# 1  1次         6.58%         33862       2227
+# 2  2次         8.35%         14412       1203
+# 3  3次及以上    8.60%         2301        198
+# 4  特殊编码组   10.34%        41519       4292
 
 # 年度查询次数保留0到4次，5次及以上合并长尾
 AMT_REQ_CREDIT_BUREAU_YEAR_bins = [0, 1, 2, 3, 4, 5, np.inf]
@@ -1581,14 +1624,129 @@ AMT_REQ_CREDIT_BUREAU_YEAR_summary = bins_stats(
     column='AMT_REQ_CREDIT_BUREAU_YEAR',
     df=AMT_REQ_CREDIT_BUREAU_YEAR_summary)
 
-# 	bins	default_rate	population	pop_default
-# 0	0次	7.13%	71801	5123
-# 1	1次	7.33%	63405	4650
-# 2	2次	8.10%	50192	4068
-# 3	3次	7.96%	33628	2676
-# 4	4次	8.26%	20714	1710
-# 5	5次及以上	8.78%	26252	2306
-# 6	特殊编码组	10.34%	41519	4292
+#    bins        default_rate  population  pop_default
+# 0  0次         7.13%         71801       5123
+# 1  1次         7.33%         63405       4650
+# 2  2次         8.10%         50192       4068
+# 3  3次         7.96%         33628       2676
+# 4  4次         8.26%         20714       1710
+# 5  5次及以上    8.78%         26252       2306
+# 6  特殊编码组   10.34%        41519       4292
 
 # HOUR、DAY、WEEK的非零组样本较少；MON、QRT违约率非单调，YEAR总体随查询次数增加而上升但并非严格单调
+# 保留缺失独立分箱，其余考虑合并分箱
 
+"筛选类别变量"
+object_columns = application_train.select_dtypes(include='object').columns
+
+# 分析 NAME_CONTRACT_TYPE 字段，该字段无缺失值
+application_train['NAME_CONTRACT_TYPE'].value_counts()
+# NAME_CONTRACT_TYPE
+# Cash loans         278232
+# Revolving loans     29279
+# Name: count, dtype: int64
+
+# 分析不同类别的违约率
+diff_type_default_rate('NAME_CONTRACT_TYPE')
+# ('Cash loans', '8.35%'), ('Revolving loans', '5.48%')
+
+# NAME_TYPE_SUITE
+application_train['NAME_TYPE_SUITE'].value_counts()
+# NAME_TYPE_SUITE
+# Unaccompanied      248526
+# Family              40149
+# Spouse, partner     11370
+# Children             3267
+# Other_B              1770
+# Other_A               866
+# Group of people       271
+# Name: count, dtype: int64
+
+diff_type_default_rate('NAME_TYPE_SUITE')
+# ('Unaccompanied', '8.18%'), ('Family', '7.49%'), ('Spouse, partner', '7.87%'),
+# ('Children', '7.38%'), ('Other_B', '9.83%'), ('Other_A', '8.78%'), ('Group of people', '8.49%')
+
+# NAME_INCOME_TYPE
+application_train['NAME_INCOME_TYPE'].value_counts()
+# NAME_INCOME_TYPE
+# Working                 158774
+# Commercial associate     71617
+# Pensioner                55362
+# State servant            21703
+# Unemployed                  22
+# Student                     18
+# Businessman                 10
+# Maternity leave              5
+# Name: count, dtype: int64
+diff_type_default_rate('NAME_INCOME_TYPE')
+# ('Working', '9.59%'), ('Commercial associate', '7.48%'), ('Pensioner', '5.39%'),
+# ('State servant', '5.75%'), ('Unemployed', '36.36%'), ('Student', '0.00%'),
+# ('Businessman', '0.00%'), ('Maternity leave', '40.00%')
+
+# 部分种类的数量太少，后续特征工程进一步将类别合并
+
+# CODE_GENDER
+application_train['CODE_GENDER'].value_counts()
+# CODE_GENDER
+# F      202448
+# M      105059
+# XNA         4
+# Name: count, dtype: int64
+
+diff_type_default_rate('CODE_GENDER')
+# ('F', '7.00%'), ('M', '10.14%'), ('XNA', '0.00%')
+
+# FLAG_OWN_CAR
+application_train['FLAG_OWN_CAR'].value_counts()
+# FLAG_OWN_CAR
+# N    202924
+# Y    104587
+# Name: count, dtype: int64
+
+diff_type_default_rate('FLAG_OWN_CAR')
+# ('N', '8.50%'), ('Y', '7.24%')
+
+# FLAG_OWN_REALTY
+application_train['FLAG_OWN_REALTY'].value_counts()
+# FLAG_OWN_REALTY
+# Y    213312
+# N     94199
+# Name: count, dtype: int64
+
+diff_type_default_rate('FLAG_OWN_REALTY')
+# ('Y', '7.96%'), ('N', '8.32%')
+
+# NAME_EDUCATION_TYPE
+application_train['NAME_EDUCATION_TYPE'].value_counts()
+# NAME_EDUCATION_TYPE
+# Secondary / secondary special    218391
+# Higher education                  74863
+# Incomplete higher                 10277
+# Lower secondary                    3816
+# Academic degree                     164
+# Name: count, dtype: int64
+
+diff_type_default_rate('NAME_EDUCATION_TYPE')
+# ('Secondary / secondary special', '8.94%'), ('Higher education', '5.36%'),
+# ('Incomplete higher', '8.48%'), ('Lower secondary', '10.93%'),
+# ('Academic degree', '1.83%')
+
+# NAME_FAMILY_STATUS
+application_train['NAME_FAMILY_STATUS'].value_counts()
+# NAME_FAMILY_STATUS
+# Married                  196432
+# Single / not married      45444
+# Civil marriage            29775
+# Separated                 19770
+# Widow                     16088
+# Unknown                       2
+# Name: count, dtype: int64
+
+diff_type_default_rate('NAME_FAMILY_STATUS')
+# ('Married', '7.56%'), ('Single / not married', '9.81%'),
+# ('Civil marriage', '9.94%'), ('Separated', '8.19%'),
+# ('Widow', '5.82%'), ('Unknown', '0.00%')
+
+# 以上变量均无缺失值。男性违约率高于女性；有车客户的违约率较低，是否有房产的差异较小。
+# 教育程度和家庭状态的违约率存在差异，但 Academic degree、XNA 和 Unknown 等类别样本极少，
+# 其违约率不稳定，不宜单独据此下结论，后续特征工程可考虑合并稀有类别。
