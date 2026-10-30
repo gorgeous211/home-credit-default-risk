@@ -26,13 +26,11 @@ application_test['is_test'] = 1
 
 # 合并训练集和测试集
 application = pd.concat([application_train, application_test], ignore_index=True)
-del application_train, application_test
 
 # 类别特征转换为category类型，使lightgbm可以直接处理
 obj_cols = application.select_dtypes(include='object').columns
 for col in obj_cols:
     application[col] = application[col].astype('category')
-del obj_cols
 
 # 切分X和y
 X = application.drop(columns='is_test')
@@ -75,10 +73,11 @@ params = {
     'n_estimators': 1000,       # 默认100，迭代轮数（基学习器的最大数量），
                                 # 由于调小learning_rate并且加入了早停机制，调大该参数
     # 任务与目标参数
-    'objective': 'binary',
+    'objective': 'binary',      # 默认None，binary代表二分类任务
     'class_weight': 'balanced', # 默认None，类别权重，用于处理样本不平衡
-    'random_state': 123,
-    'n_jobs': -1,
+    'random_state': 123,        # 默认None，随机种子
+    'importance_type': 'gain',  # 默认'split'，特征重要性计算方式，'gain'表示按信息增益计算
+    'n_jobs': -1,               # 默认None，-1代表使用全部CPU核心
 }
 
 callbacks = [lgb.early_stopping(
@@ -102,8 +101,8 @@ for train_idx, val_idx in skf.split(X, y):
     oof_preds[val_idx] = clf.predict_proba(X_val)[:, 1]
     feature_importance += clf.feature_importances_ / skf.n_splits
 
-overall_auc = roc_auc_score(y, oof_preds)
-# 0.8949629023316891
+overall_auc = round(roc_auc_score(y, oof_preds), 2)
+# 0.89
 
 importance_df = pd.DataFrame({
     'feature': X_train.columns,
@@ -111,18 +110,18 @@ importance_df = pd.DataFrame({
 }).sort_values('importance', ascending=False)
 
 importance_df.head(10)
-#                    feature  importance
-# 6               AMT_CREDIT      2727.0
-# 38       ORGANIZATION_TYPE      2248.6
-# 7              AMT_ANNUITY      2134.6
-# 8          AMT_GOODS_PRICE      1644.0
-# 93  DAYS_LAST_PHONE_CHANGE       955.6
-# 41            EXT_SOURCE_3       921.2
-# 15              DAYS_BIRTH       811.0
-# 39            EXT_SOURCE_1       782.2
-# 18         DAYS_ID_PUBLISH       735.8
-# 40            EXT_SOURCE_2       711.6
+#                        feature     importance
+# 6                   AMT_CREDIT  287596.707496
+# 7                  AMT_ANNUITY  200538.586412
+# 117  AMT_REQ_CREDIT_BUREAU_MON  183063.273897
+# 118  AMT_REQ_CREDIT_BUREAU_QRT  157605.925762
+# 8              AMT_GOODS_PRICE  114633.155271
+# 0           NAME_CONTRACT_TYPE   91235.675193
+# 38           ORGANIZATION_TYPE   57943.737944
+# 25                  FLAG_EMAIL   57537.064442
+# 39                EXT_SOURCE_1   52712.000303
+# 93      DAYS_LAST_PHONE_CHANGE   42720.664838
 
 # 通过AUC的值可以得出，训练集和测试集二者存在可检测的特征分布差异
-# AMT_CREDIT、ORGANIZATION_TYPE、AMT_ANNUITY 等排名靠前，可作为进一步检查分布差异的重点变量
+# AMT_CREDIT、AMT_ANNUITY 等排名靠前，可作为进一步检查分布差异的重点变量
 # 该结果反映当前模型的区分能力；要判断具体漂移特征及其对违约预测的影响，还需比较这些变量的训练集与测试集分布
