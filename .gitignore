@@ -11,3 +11,4 @@ __pycache__/
 
 # 原始数据集
 /data/raw/
+/data/processed
