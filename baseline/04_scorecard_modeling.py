@@ -100,6 +100,8 @@ for col in cat_features:
     binning_fit_params[col] = {
         "min_bin_n_event": 30,
     }
+    
+del u_shape_cols
 del col
 
 # 实例化精细分箱器
@@ -146,17 +148,6 @@ X.EMERGENCYSTATE_MODE.value_counts(dropna=False, normalize=True)
 # 最终只得到正常和缺失两个分箱
 # 特征池中已有HOUSE_INFO_MISSING_RATE，故不需要保留这两个房屋特征
 
-def get_woe_summary(column):
-    optb = fine_binning_process.get_binned_variable(column)
-    bt = optb.binning_table
-    df_bin = bt.build()
-    
-    return df_bin
-
-woe_summary = {}
-for col in features:
-    woe_summary[col] = get_woe_summary(col)
-
 X_train_woe = pd.DataFrame(
     fine_binning_process.transform(X_train, metric="woe", metric_missing="empirical"),
     columns=features,
@@ -173,6 +164,8 @@ X_valid_woe = pd.DataFrame(
 X_train_woe = X_train_woe.drop(columns=['HOUSETYPE_MODE', 'EMERGENCYSTATE_MODE'])
 X_valid_woe = X_valid_woe.drop(columns=['HOUSETYPE_MODE', 'EMERGENCYSTATE_MODE'])
 # 剔除了两个特征
+
+del binning_fit_params
 
 # 剩余34个特征
 features = X_train_woe.columns.tolist()
@@ -191,6 +184,8 @@ result = train_woe_corr.stack().reset_index()
 result.columns = ['val1', 'val2', 'corr']
 result = result[np.abs(result['corr']).between(0.8, 1, inclusive='left')]
 
+del train_woe_corr
+
 # 保留iv值最大的一个特征
 iv_dict = dict(zip(binning_summary['feature'], binning_summary['iv']))
 result['iv1'] = result['val1'].map(iv_dict)
@@ -199,10 +194,13 @@ result['iv2'] = result['val2'].map(iv_dict)
 delete_feature = result.loc[result['iv1'] < result['iv2'], 'val1'].tolist()
 delete_feature = list(set(delete_feature))
 # 一共有7个特征
+
+del binning_summary, iv_dict
 del result
 
 features = [col for col in features if col not in delete_feature]
-del num_features
+num_features = X_train[features].select_dtypes(include='number').columns.tolist()
+cat_features = X_train[features].select_dtypes(include='object').columns.tolist()
 
 # 剔除7个特征后，剩余27个特征
 X_train_woe = X_train_woe.drop(columns=delete_feature)
@@ -220,6 +218,7 @@ del X_with_const
 # 删除VIF大于5的特征
 vif[vif > 5]
 # 为空
+del vif
 
 # --逐步回归筛选特征 --
 stepwise_df = toad.selection.stepwise(
@@ -232,6 +231,8 @@ stepwise_df = toad.selection.stepwise(
 
 final_model_feats = stepwise_df.drop(columns="TARGET").columns.tolist()
 # 逐步回归并没有剔除额外的特征
+del features
+del stepwise_df
 
 # -- 检查系数是否反转（大于0）--
 logit_mod = sm.Logit(y_train, sm.add_constant(X_train_woe)).fit()
@@ -245,6 +246,7 @@ coefs[coefs > 0]
 # 剔除系数大于0的
 delete_feature = coefs[coefs > 0].index.tolist()
 # 一共四个特征
+del logit_mod, coefs
 
 # -- 检查系数不显著的特征 --
 pvalues = logit_mod.pvalues.drop('const')
@@ -258,8 +260,11 @@ pvalues[pvalues > 0.05]
 
 final_model_feats = [col for col in final_model_feats if col not in delete_feature]
 # 剔除4个特征后，最后剩余23个特征
+
 num_features = X_train[final_model_feats].select_dtypes(include='number').columns.tolist()
 cat_features = X_train[final_model_feats].select_dtypes(include='object').columns.tolist()
+
+del X_train_woe, X_valid_woe
 
 # %%
 # 训练标准评分卡并映射 PDO 分数刻度
@@ -292,8 +297,51 @@ scorecard = Scorecard(
     rounding=True  # 将每个分箱的得分四舍五入为整数，方便业务线上部署
 )
 
+del base_odds, lr_estimator
+
 # Scorecard.fit 接收的是未转 WOE 前的原始训练集（内部会自动调用 fine_binning_process）
-scorecard.fit(X_train, y_train)
+scorecard.fit(X_train[final_model_feats], y_train)
 
 # 导出标准评分卡各分箱加减分明细表
 scorecard_table = scorecard.table(style="detailed")
+scorecard_table.to_csv(DATA_PATH / 'processed' / 'final_scorecard_table.csv', index=False)
+
+# %%
+# 模型评估
+# 预测违约概率 (用于算 AUC / KS) 与 信用评分 (用于算分箱 Bad Rate 与总分 PSI)
+train_prob = scorecard.predict_proba(X_train[final_model_feats])[:, 1]
+valid_prob = scorecard.predict_proba(X_valid[final_model_feats])[:, 1]
+
+train_score = scorecard.score(X_train[final_model_feats])
+valid_score = scorecard.score(X_valid[final_model_feats])
+
+def calc_ks(y_true, y_prob):
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    return np.max( np.abs(tpr - fpr) )
+
+
+train_auc = roc_auc_score(y_train, train_prob)  # 0.7512406769517261
+valid_auc = roc_auc_score(y_valid, valid_prob)  # 0.7469221976453592
+train_ks = calc_ks(y_train, train_prob)  # np.float64(0.3734961505393157)
+valid_ks = calc_ks(y_valid, valid_prob)  # np.float64(0.37279770876235524)
+
+# 使用 toad 的 Combiner 在训练集分数上拟合 10 等频切点
+score_combiner = toad.transform.Combiner()
+score_combiner.fit(pd.Series(train_score, name='score'), method='quantile', n_bins=10)
+
+# 直接传入 combiner 计算模型总分 PSI
+valid_score_psi = toad.metrics.PSI(train_score, valid_score, combiner=score_combiner)
+# np.float64(0.00020331281789280777)
+
+# == 评分卡模型最终表现汇总 ==
+f"入模特征总数 : {len(final_model_feats)} 个"
+# 入模特征总数 : 23 个
+
+f"训练集 (Train): AUC = {train_auc:.4f} | KS = {train_ks:.4f}"
+# 训练集 (Train): AUC = 0.7512 | KS = 0.3735
+
+f"验证集 (Valid): AUC = {valid_auc:.4f} | KS = {valid_ks:.4f}"
+# 验证集 (Valid): AUC = 0.7469 | KS = 0.3728
+
+f"验证集分数 PSI: {valid_score_psi:.5f} (要求 < 0.10)"
+# 验证集分数 PSI: 0.00020 (要求 < 0.10)
