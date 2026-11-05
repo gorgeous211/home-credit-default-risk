@@ -16,15 +16,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 import toad
 
 from optbinning import BinningProcess
+from optbinning import Scorecard
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, roc_curve
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # 文件路径
 DATA_PATH = Path().cwd() / 'data'
 
-# 主申请表
+# 主申请表，一共36个特征
 train_fe = pd.read_csv(DATA_PATH / 'processed' / 'train_fe.csv')
 
 # eda结果
@@ -69,15 +74,12 @@ X_train, X_valid, y_train, y_valid = train_test_split(
 # 数值特征：强制单调 (auto_asc_desc 自动判断单调增或单调减，杜绝 U 型或锯齿波动)
 # 类别特征：optbinning 会自动按各分类的 Bad Rate 排序并合并相似风险分类
 
-features = X.columns.tolist()
-num_features = X.select_dtypes(include='number').columns.tolist()
-cat_features = X.select_dtypes(include='object').columns.tolist()
-
-u_shape_cols = ["AMT_GOODS_PRICE",
-                "AMT_ANNUITY",
-                "ANNUITY_TO_CREDIT_RATIO",
-                "HOUSE_INFO_MISSING_RATE",
-                ]
+u_shape_cols = [
+    "AMT_GOODS_PRICE",
+    "AMT_ANNUITY",
+    "ANNUITY_TO_CREDIT_RATIO",
+    "HOUSE_INFO_MISSING_RATE",
+]
 
 # min_bin_n_event=30：落实注释中“每个分箱坏样本数不少于 20~30 个”的约束
 binning_fit_params = {}
@@ -170,13 +172,15 @@ X_valid_woe = pd.DataFrame(
 # 更新移除这两个特征后的X_train_woe和X_valid_woe
 X_train_woe = X_train_woe.drop(columns=['HOUSETYPE_MODE', 'EMERGENCYSTATE_MODE'])
 X_valid_woe = X_valid_woe.drop(columns=['HOUSETYPE_MODE', 'EMERGENCYSTATE_MODE'])
+# 剔除了两个特征
 
+# 剩余34个特征
 features = X_train_woe.columns.tolist()
-num_features = X_train_woe.select_dtypes(include='number').columns.tolist()
-cat_features = X_train_woe.select_dtypes(include='object').columns.tolist()
+num_features = X_train[features].select_dtypes(include='number').columns.tolist()
+cat_features = X_train[features].select_dtypes(include='object').columns.tolist()
 
 # %%
-# optbinning woe 定义为 ln(good%/bad%)，即好坏比的对数：好客户占比越高，WOE 越大；违约率越高，WOE 越负
+# optbinning woe 定义为 ln(good%/bad%)，即好坏比的对数：好客户占比越高，WOE 越大
 # 当预测目标为违约概率P(Y=1)时，所有正常入模特征的逻辑回归系数都必须严格为负，如果某个特征出现了正系数，说明发生了共线性符号反转，必须剔除
 
 # -- WOE相关性筛选 --
@@ -194,8 +198,102 @@ result['iv2'] = result['val2'].map(iv_dict)
 
 delete_feature = result.loc[result['iv1'] < result['iv2'], 'val1'].tolist()
 delete_feature = list(set(delete_feature))
+# 一共有7个特征
 del result
 
 features = [col for col in features if col not in delete_feature]
+del num_features
 
-# -- 
+# 剔除7个特征后，剩余27个特征
+X_train_woe = X_train_woe.drop(columns=delete_feature)
+X_valid_woe = X_valid_woe.drop(columns=delete_feature)
+
+# -- VIF多重共线性剔除 --
+# 必须加入常数项截距 const 才能准确计算有截距逻辑回归的 VIF
+X_with_const = sm.add_constant(X_train_woe)
+vif = pd.Series(
+    [variance_inflation_factor(X_with_const.values, i) for i in range(1, X_with_const.shape[1])],
+    index=features
+)
+del X_with_const
+
+# 删除VIF大于5的特征
+vif[vif > 5]
+# 为空
+
+# --逐步回归筛选特征 --
+stepwise_df = toad.selection.stepwise(
+    X_train_woe.join(y_train),
+    target='TARGET',
+    estimator='lr',
+    direction='both',
+    criterion='aic'
+)
+
+final_model_feats = stepwise_df.drop(columns="TARGET").columns.tolist()
+# 逐步回归并没有剔除额外的特征
+
+# -- 检查系数是否反转（大于0）--
+logit_mod = sm.Logit(y_train, sm.add_constant(X_train_woe)).fit()
+coefs = logit_mod.params.drop('const')
+coefs[coefs > 0]
+# NAME_INCOME_TYPE              0.033956
+# REGION_POPULATION_RELATIVE    0.038563
+# DAYS_BIRTH                    0.302126
+# REG_CITY_NOT_WORK_CITY        0.213023
+
+# 剔除系数大于0的
+delete_feature = coefs[coefs > 0].index.tolist()
+# 一共四个特征
+
+# -- 检查系数不显著的特征 --
+pvalues = logit_mod.pvalues.drop('const')
+pvalues[pvalues > 0.05]
+# NAME_INCOME_TYPE              0.494729
+# REGION_POPULATION_RELATIVE    0.846017
+# BASEMENTAREA_AVG              0.104777
+# NONLIVINGAREA_AVG             0.182928
+
+# p值值得关注，但是不是必要筛选条件
+
+final_model_feats = [col for col in final_model_feats if col not in delete_feature]
+# 剔除4个特征后，最后剩余23个特征
+num_features = X_train[final_model_feats].select_dtypes(include='number').columns.tolist()
+cat_features = X_train[final_model_feats].select_dtypes(include='object').columns.tolist()
+
+# %%
+# 训练标准评分卡并映射 PDO 分数刻度
+fine_binning_process.variable_names = final_model_feats
+fine_binning_process.categorical_variables = cat_features
+
+# 设置标准评分卡刻度参数：
+# - scaling_method="pdo_odds"
+# - pdo=20：好坏比 (Odds) 每翻一倍，分数增加 20 分
+# - scorecard_points=600：基准分 600 分
+base_odds = (1 - y_train.mean()) / y_train.mean()  # np.float64(11.38710976837865)
+
+lr_estimator = LogisticRegression(
+    penalty=None,        # 关闭正则化
+    solver='lbfgs',
+    max_iter=1000,       # 迭代次数，表示最多进行 1000 次迭代
+    tol=1e-6,            # 收敛精度，表示优化算法的收敛容忍度，容忍度越小，通常越难提前满足收敛条件，可能需要更多迭代次数
+    random_state=123
+)
+
+scorecard = Scorecard(
+    binning_process=fine_binning_process,
+    estimator=lr_estimator,
+    scaling_method="pdo_odds",
+    scaling_method_params={
+        "pdo": 20,
+        "odds": base_odds,
+        "scorecard_points": 600
+    },
+    rounding=True  # 将每个分箱的得分四舍五入为整数，方便业务线上部署
+)
+
+# Scorecard.fit 接收的是未转 WOE 前的原始训练集（内部会自动调用 fine_binning_process）
+scorecard.fit(X_train, y_train)
+
+# 导出标准评分卡各分箱加减分明细表
+scorecard_table = scorecard.table(style="detailed")
