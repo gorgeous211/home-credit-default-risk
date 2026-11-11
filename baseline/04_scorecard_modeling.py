@@ -246,7 +246,7 @@ coefs[coefs > 0]
 # 剔除系数大于0的
 delete_feature = coefs[coefs > 0].index.tolist()
 # 一共四个特征
-del logit_mod, coefs
+del coefs
 
 # -- 检查系数不显著的特征 --
 pvalues = logit_mod.pvalues.drop('const')
@@ -257,6 +257,7 @@ pvalues[pvalues > 0.05]
 # NONLIVINGAREA_AVG             0.182928
 
 # p值值得关注，但是不是必要筛选条件
+del logit_mod
 
 final_model_feats = [col for col in final_model_feats if col not in delete_feature]
 # 剔除4个特征后，最后剩余23个特征
