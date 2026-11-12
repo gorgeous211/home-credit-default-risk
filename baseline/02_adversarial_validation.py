@@ -55,7 +55,9 @@ params = {
     # 复杂度控制参数
     # 浅树更倾向于捕捉全局性特征分布差异，避免深树在叶节点上对个别样本强行切分
     'max_depth': 5,             # 默认-1，树的最大深度， 一般在3、4、5这三个数里挑一个
-    'num_leaves': 31,           # 默认31，树的最大叶子数，取<=2^max_depth-1=2^5-1=31
+    'num_leaves': 16,           # 默认31，树的最大叶子数。从31下调至16(远低于2^5=32)
+                                # 对抗验证核心是捕捉宏观分布漂移并严格防止过拟合，若设为31会使树几乎满分裂，
+                                # 失去Leaf-wise剪枝控制复杂度的意义，容易细碎划分拟合局部噪声产生“虚假漂移”
     'min_child_samples': 50,    # 默认20，单个叶子节点上所需的最小样本数
                                 # 调大该参数，防止叶节点样本数过少导致的局部过拟合
                                 
@@ -74,7 +76,12 @@ params = {
                                 # 由于调小learning_rate并且加入了早停机制，调大该参数
     # 任务与目标参数
     'objective': 'binary',      # 默认None，binary代表二分类任务
-    'class_weight': 'balanced', # 默认None，类别权重，用于处理样本不平衡
+    'metric': 'auc',
+    'class_weight': None,       # 默认None。对抗验证不建议设置balanced：
+                                # ①测试集样本达4.8万(占13.7%)，绝对量充沛非极端不平衡；
+                                # ②AUC衡量全局相对排序能力，对类别不平衡天然鲁棒；
+                                # ③保持自然比例可保证预测概率反映真实的数据分布密度比，避免分裂增益过度偏向测试集，也便于后续做样本重要性加权或概率校准
+
     'random_state': 123,        # 默认None，随机种子
     'importance_type': 'gain',  # 默认'split'，特征重要性计算方式，'gain'表示按信息增益计算
     'n_jobs': -1,               # 默认None，-1代表使用全部CPU核心
@@ -111,16 +118,16 @@ importance_df = pd.DataFrame({
 
 importance_df.head(10)
 #                        feature     importance
-# 6                   AMT_CREDIT  287596.707496
-# 7                  AMT_ANNUITY  200538.586412
-# 117  AMT_REQ_CREDIT_BUREAU_MON  183063.273897
-# 118  AMT_REQ_CREDIT_BUREAU_QRT  157605.925762
-# 8              AMT_GOODS_PRICE  114633.155271
-# 0           NAME_CONTRACT_TYPE   91235.675193
-# 38           ORGANIZATION_TYPE   57943.737944
-# 25                  FLAG_EMAIL   57537.064442
-# 39                EXT_SOURCE_1   52712.000303
-# 93      DAYS_LAST_PHONE_CHANGE   42720.664838
+# 6                   AMT_CREDIT  126529.919421
+# 7                  AMT_ANNUITY   90629.472365
+# 118  AMT_REQ_CREDIT_BUREAU_QRT   85252.653770
+# 117  AMT_REQ_CREDIT_BUREAU_MON   70770.088168
+# 8              AMT_GOODS_PRICE   54966.208739
+# 0           NAME_CONTRACT_TYPE   36930.647128
+# 25                  FLAG_EMAIL   32490.213146
+# 39                EXT_SOURCE_1   24006.952228
+# 38           ORGANIZATION_TYPE   23038.961704
+# 93      DAYS_LAST_PHONE_CHANGE   20621.832702
 
 # 通过AUC的值可以得出，训练集和测试集二者存在可检测的特征分布差异
 # AMT_CREDIT、AMT_ANNUITY 等排名靠前，可作为进一步检查分布差异的重点变量
